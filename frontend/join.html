@@ -33,7 +33,20 @@
   <script>
     const API_BASE = location.pathname.startsWith('/haorizi') ? '/haorizi-api' : '';
     const LEGACY_KEYS = ['hrz_group_token', 'hrz_group_id', 'hrz_group_name'];
-    const els = Object.fromEntries(['code','joinBtn','joinMsg','joinCard','qrCard','groupName','groupDesc','groupCodeMask','qrImg','qrFallback','goWorkspace','refreshQr'].map((name) => [name, document.getElementById(name.replace(/[A-Z]/g, (c) => '-' + c.toLowerCase()))]));
+    const els = {
+      code: document.getElementById('group-code'),
+      joinBtn: document.getElementById('join-btn'),
+      joinMsg: document.getElementById('join-msg'),
+      joinCard: document.getElementById('join-card'),
+      qrCard: document.getElementById('qr-card'),
+      groupName: document.getElementById('group-name'),
+      groupDesc: document.getElementById('group-desc'),
+      groupCodeMask: document.getElementById('group-code-mask'),
+      qrImg: document.getElementById('qr-img'),
+      qrFallback: document.getElementById('qr-fallback'),
+      goWorkspace: document.getElementById('go-workspace'),
+      refreshQr: document.getElementById('refresh-qr'),
+    };
     let currentGroup = null;
     function clearLegacySession() { LEGACY_KEYS.forEach((key) => localStorage.removeItem(key)); }
     function showMsg(text) { els.joinMsg.textContent = text; els.joinMsg.classList.remove('hidden'); }
