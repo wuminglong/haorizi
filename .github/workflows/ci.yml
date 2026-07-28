@@ -20,7 +20,7 @@ jobs:
     timeout-minutes: 10
     env:
       AUTO_CREATE_TABLES: "false"
-      DATABASE_URL: sqlite:///${{ runner.temp }}/haorizi-ci.db
+      DATABASE_URL: sqlite:////tmp/haorizi-ci.db
       SESSION_SECRET: ci-only-session-secret
       ADMIN_TOKEN: ci-only-admin-token
       PUSHPLUS_ENABLED: "false"
