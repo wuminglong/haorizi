@@ -94,7 +94,6 @@ def join_group(
             "expires_in_seconds": settings.pushplus_qr_seconds,
         },
         session={
-            "token": token,
             "expires_at": expires_at,
         },
     )

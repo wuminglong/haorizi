@@ -58,7 +58,10 @@ journalctl -u haorizi-worker -n 100 --no-pager
 3. 执行 `alembic upgrade head`
 4. 重启并验证健康检查、建群、进群、提醒 CRUD 和 worker
 
-不要把旧表改名归档当作长期状态；确认不再回滚后应删除归档表。
+首次从旧个人 OpenID demo 升级且还没有 `groups` 表时，migration 会把与新模型同名的旧表改名为
+`legacy_pre_group_20260728_*`，保留旧数据后再创建当前五张业务表。`users`、
+`anniversary_events` 等不冲突旧表不会自动改动。迁移前后都要核对表名和数据量；不要把归档表当作长期状态，
+确认不再回滚且完成数据留档后再人工删除。
 
 生产环境应设置 `AUTO_CREATE_TABLES=false`，由 Alembic migration 唯一管理 schema：
 

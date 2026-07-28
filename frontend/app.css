@@ -175,7 +175,6 @@ input:focus, select:focus, textarea:focus {
   font-weight: 600;
 }
 .nav-tab.active { color: var(--green); background: rgba(52,199,89,.10); }
-.fab { bottom: calc(82px + var(--safe-bottom)); }
 .tab {
   border: none;
   background: transparent;
@@ -253,6 +252,10 @@ input:focus, select:focus, textarea:focus {
   cursor: pointer;
 }
 .fab:active { background: var(--green-pressed); }
+.bottom-nav + .fab {
+  bottom: calc(82px + var(--safe-bottom));
+  z-index: 11;
+}
 .sheet-mask {
   position: fixed;
   inset: 0;

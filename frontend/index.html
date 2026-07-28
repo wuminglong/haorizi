@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>好日子提醒</title>
-  <link rel="stylesheet" href="./app.css">
+  <link rel="stylesheet" href="./app.css?v=20260728-1">
 </head>
 <body>
   <div class="page app-page">
@@ -97,7 +97,7 @@
   <script>
     const API_BASE = location.pathname.startsWith('/haorizi') ? '/haorizi-api' : '';
     const LEGACY_KEYS = ['hrz_group_token', 'hrz_group_id', 'hrz_group_name'];
-    const state = { group: null, reminders: [], plans: [], editingId: null, tab: 'reminders' };
+    const state = { group: null, reminders: [], plans: [], editingId: null, tab: 'reminders', previewKey: null };
     const $ = (id) => document.getElementById(id);
     const titles = { reminders: '提醒', plans: '日程', mine: '我的' };
 
@@ -150,7 +150,7 @@
       $('f-title').value = reminder ? reminder.title : ''; $('f-person').value = reminder ? (reminder.person_name || '') : ''; $('f-calendar').value = reminder ? reminder.calendar_type : 'solar'; $('f-recurring').value = reminder ? (reminder.is_recurring ? '1' : '0') : '1'; $('f-year').value = reminder && reminder.event_year ? reminder.event_year : ''; $('f-month').value = reminder ? reminder.month : 1; $('f-day').value = reminder ? reminder.day : 1; $('f-leap').checked = !!(reminder && reminder.is_leap_month); $('f-leap-policy').value = reminder ? (reminder.leap_month_policy || 'skip') : 'skip'; $('f-missing-day-policy').value = reminder ? (reminder.missing_day_policy || 'last_day') : 'last_day';
       $('f-time').value = String(reminder ? reminder.rule.remind_time : '09:00:00').slice(0, 5); $('f-advance').value = reminder ? reminder.rule.advance_days : 7; $('f-onday').checked = reminder ? !!reminder.rule.include_on_day : true; $('f-remark').value = reminder ? (reminder.remark || '') : ''; $('f-enabled').checked = reminder ? !!reminder.enabled : true; $('delete-btn').classList.toggle('hidden', !reminder); $('form-msg').classList.add('hidden'); $('date-preview').classList.add('hidden'); updateDateControls(); $('sheet-mask').classList.remove('hidden');
     }
-    function closeSheet() { $('sheet-mask').classList.add('hidden'); state.editingId = null; }
+    function closeSheet() { $('sheet-mask').classList.add('hidden'); state.editingId = null; state.previewKey = null; }
     function updateDateControls() {
       const lunar = $('f-calendar').value === 'lunar';
       const leap = lunar && $('f-leap').checked;
@@ -162,6 +162,9 @@
       $('year-label').textContent = lunar ? '农历年' : '年份';
       $('f-year').placeholder = lunar ? '一次性必填（农历年）' : '一次性必填';
       $('year-field').style.opacity = $('f-recurring').value === '1' ? .45 : 1;
+      state.previewKey = null;
+      $('date-preview').classList.add('hidden');
+      $('save-btn').textContent = '保存';
     }
     function collectPayload() { let time = ($('f-time').value || '09:00').trim(); if (time.length === 5) time += ':00'; const recurring = $('f-recurring').value === '1', yearRaw = ($('f-year').value || '').trim(); return { title: ($('f-title').value || '').trim(), person_name: ($('f-person').value || '').trim() || null, calendar_type: $('f-calendar').value, event_year: recurring ? null : (yearRaw ? Number(yearRaw) : null), month: Number($('f-month').value || 0), day: Number($('f-day').value || 0), is_leap_month: $('f-leap').checked, leap_month_policy: $('f-leap-policy').value, missing_day_policy: $('f-missing-day-policy').value, is_recurring: recurring, enabled: $('f-enabled').checked, remark: ($('f-remark').value || '').trim() || null, rule: { remind_time: time, advance_days: Number($('f-advance').value || 0), include_on_day: $('f-onday').checked } }; }
     function renderDatePreview(preview) {
@@ -178,7 +181,8 @@
       const preview = await api('/api/group/reminders/preview', { method: 'POST', body: JSON.stringify({ calendar_type: payload.calendar_type, event_year: payload.event_year, month: payload.month, day: payload.day, is_leap_month: payload.is_leap_month, leap_month_policy: payload.leap_month_policy, missing_day_policy: payload.missing_day_policy, is_recurring: payload.is_recurring }) });
       renderDatePreview(preview);
     }
-    async function saveReminder() { const payload = collectPayload(); if (!payload.title) { $('form-msg').textContent = '请填写提醒名称'; $('form-msg').classList.remove('hidden'); return; } $('save-btn').disabled = true; try { await previewDates(payload); await api('/api/group/reminders' + (state.editingId ? '/' + state.editingId : ''), { method: state.editingId ? 'PUT' : 'POST', body: JSON.stringify(payload) }); closeSheet(); await refreshAll(); } catch (err) { $('form-msg').textContent = err.message || '保存失败'; $('form-msg').classList.remove('hidden'); } finally { $('save-btn').disabled = false; } }
+    function datePreviewKey(payload) { return JSON.stringify({ calendar_type: payload.calendar_type, event_year: payload.event_year, month: payload.month, day: payload.day, is_leap_month: payload.is_leap_month, leap_month_policy: payload.leap_month_policy, missing_day_policy: payload.missing_day_policy, is_recurring: payload.is_recurring }); }
+    async function saveReminder() { const payload = collectPayload(); if (!payload.title) { $('form-msg').textContent = '请填写提醒名称'; $('form-msg').classList.remove('hidden'); return; } $('save-btn').disabled = true; try { const previewKey = datePreviewKey(payload); if (state.previewKey !== previewKey) { await previewDates(payload); state.previewKey = previewKey; $('save-btn').textContent = '确认保存'; return; } await api('/api/group/reminders' + (state.editingId ? '/' + state.editingId : ''), { method: state.editingId ? 'PUT' : 'POST', body: JSON.stringify(payload) }); closeSheet(); await refreshAll(); } catch (err) { $('form-msg').textContent = err.message || '保存失败'; $('form-msg').classList.remove('hidden'); } finally { $('save-btn').disabled = false; } }
     async function deleteReminder() { if (!state.editingId || !confirm('确定删除这条提醒吗？删除后不可恢复。')) return; try { await api('/api/group/reminders/' + state.editingId, { method: 'DELETE' }); closeSheet(); await refreshAll(); } catch (err) { showError(err.message); } }
     async function refreshAll() { const [reminders, plans] = await Promise.all([api('/api/group/reminders'), api('/api/group/plans?status=pending&limit=50')]); state.reminders = reminders; state.plans = plans; renderReminders(); renderPlans(); }
     async function boot() { clearLegacySession(); hideError(); try { const me = await api('/api/group/me'); state.group = me.group; renderGroup(); await refreshAll(); setTab(state.tab); } catch (err) { if (!location.href.includes('join.html')) showError(err.message); } }

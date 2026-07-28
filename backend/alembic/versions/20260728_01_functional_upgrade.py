@@ -24,11 +24,68 @@ def upgrade() -> None:
     inspector = sa.inspect(bind)
     tables = set(inspector.get_table_names())
     if "groups" not in tables:
+        # The pre-group OpenID demo used some of the same generic table names
+        # (notably ``reminders``).  Creating the group schema on top of those
+        # tables would leave their incompatible columns in place while Alembic
+        # still stamps this revision as complete.  Preserve every collision
+        # under an explicit legacy name before bootstrapping the current five
+        # business tables.  Unrelated legacy tables such as ``users`` and
+        # ``anniversary_events`` remain untouched for manual archival.
+        current_table_names = {
+            "reminders",
+            "reminder_rules",
+            "reminder_plans",
+            "send_logs",
+        }
+        collisions = sorted(tables & current_table_names)
+        for table_name in collisions:
+            legacy_name = f"legacy_pre_group_20260728_{table_name}"
+            if legacy_name in tables:
+                raise RuntimeError(
+                    f"cannot archive incompatible table {table_name!r}: "
+                    f"target {legacy_name!r} already exists"
+                )
+            op.rename_table(table_name, legacy_name)
+            tables.remove(table_name)
+            tables.add(legacy_name)
+
         from app.db import Base
         from app import models  # noqa: F401
 
         Base.metadata.create_all(bind=bind)
         return
+
+    required_tables = {
+        "groups",
+        "reminders",
+        "reminder_rules",
+        "reminder_plans",
+        "send_logs",
+    }
+    missing_tables = sorted(required_tables - tables)
+    if missing_tables:
+        raise RuntimeError(
+            "incomplete group-reminder schema; back up and inspect before retrying: "
+            f"missing tables {', '.join(missing_tables)}"
+        )
+
+    # Refuse to mutate an unknown schema that merely happens to contain a
+    # table named ``groups``.  All checks happen before the first DDL change so
+    # an incompatible database cannot be partially transformed and stamped.
+    required_marker_columns = {
+        "groups": {"id", "code", "push_topic_code", "code_updated_at"},
+        "reminders": {"id", "group_id", "calendar_type", "deleted_at"},
+        "reminder_rules": {"id", "reminder_id", "advance_days"},
+        "reminder_plans": {"id", "group_id", "reminder_id", "target_date", "kind", "status"},
+        "send_logs": {"id", "group_id", "reminder_id", "plan_id", "status"},
+    }
+    for table_name, required_columns in required_marker_columns.items():
+        missing_columns = sorted(required_columns - _columns(inspector, table_name))
+        if missing_columns:
+            raise RuntimeError(
+                f"incompatible table {table_name!r}; back up and inspect before retrying: "
+                f"missing columns {', '.join(missing_columns)}"
+            )
 
     group_columns = _columns(inspector, "groups")
     with op.batch_alter_table("groups") as batch:

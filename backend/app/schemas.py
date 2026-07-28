@@ -34,7 +34,6 @@ class JoinPushInfo(BaseModel):
 
 
 class SessionInfo(BaseModel):
-    token: str
     expires_at: datetime
 
 

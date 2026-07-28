@@ -111,7 +111,12 @@ def _recurring_lunar_policies(reminder: Reminder) -> tuple[LeapMonthPolicy, Miss
 
 def target_date_for_year(reminder: Reminder, year: int) -> date:
     if reminder.calendar_type == "solar":
-        return _safe_solar_date(year, reminder.month, reminder.day)
+        try:
+            return date(year, reminder.month, reminder.day)
+        except ValueError:
+            if not reminder.is_recurring or getattr(reminder, "missing_day_policy", "last_day") == "skip":
+                raise
+            return _safe_solar_date(year, reminder.month, reminder.day)
     if reminder.calendar_type != "lunar":
         raise ValueError(f"Unsupported calendar_type: {reminder.calendar_type}")
 
@@ -157,13 +162,6 @@ def candidate_target_dates(
             return [target]
         except ValueError:
             return []
-
-    if reminder.calendar_type != "lunar":
-        return [
-            target_date_for_year(reminder, year)
-            for year in range(from_year, from_year + years_ahead + 1)
-            if not_before is None or target_date_for_year(reminder, year) >= not_before
-        ]
 
     valid_dates: list[date] = []
     desired_count = years_ahead + 1

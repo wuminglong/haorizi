@@ -95,3 +95,26 @@ def test_one_off_lunar_reminder_does_not_apply_recurrence_policies() -> None:
         leap_month_policy="regular_month",
     )
     assert candidate_target_dates(reminder, 2021) == []
+
+
+def test_recurring_solar_february_29_uses_explicit_missing_day_policy() -> None:
+    last_day = Reminder(
+        title="闰日",
+        calendar_type="solar",
+        month=2,
+        day=29,
+        is_recurring=True,
+        enabled=True,
+        missing_day_policy="last_day",
+    )
+    skipped = Reminder(
+        title="闰日",
+        calendar_type="solar",
+        month=2,
+        day=29,
+        is_recurring=True,
+        enabled=True,
+        missing_day_policy="skip",
+    )
+    assert candidate_target_dates(last_day, 2025, years_ahead=0) == [date(2025, 2, 28)]
+    assert candidate_target_dates(skipped, 2025, years_ahead=0) == [date(2028, 2, 29)]

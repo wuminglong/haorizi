@@ -50,23 +50,12 @@ def require_admin(
         enforce_trusted_origin(request)
 
 
-def get_bearer_token(authorization: str | None) -> str | None:
-    if not authorization:
-        return None
-    parts = authorization.split(" ", 1)
-    if len(parts) != 2 or parts[0].lower() != "bearer":
-        return None
-    token = parts[1].strip()
-    return token or None
-
-
 def get_current_group(
     request: Request,
     db: Session = Depends(get_db),
-    authorization: str | None = Header(default=None),
 ) -> Group:
     settings = get_settings()
-    token = get_bearer_token(authorization) or request.cookies.get(settings.group_session_cookie_name)
+    token = request.cookies.get(settings.group_session_cookie_name)
     if not token:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="登录状态已失效，请重新输入群组码")
 

@@ -57,19 +57,25 @@ def test_admin_create_and_join_flow() -> None:
     assert join.status_code == 200, join.text
     data = join.json()
     assert data["group"]["name"] == "吴家提醒群"
-    assert data["session"]["token"]
-    token = data["session"]["token"]
+    assert "token" not in data["session"]
+    assert data["session"]["expires_at"]
+    token = client.cookies.get("haorizi_group_session")
+    assert token
 
     cookie_me = client.get("/api/group/me")
     assert cookie_me.status_code == 200
 
-    me = client.get("/api/group/me", headers={"Authorization": f"Bearer {token}"})
+    client.cookies.clear()
+    rejected_bearer = client.get("/api/group/me", headers={"Authorization": f"Bearer {token}"})
+    assert rejected_bearer.status_code == 401
+
+    assert client.post("/api/public/groups/join", json={"group_code": "FAMILY01"}).status_code == 200
+    me = client.get("/api/group/me")
     assert me.status_code == 200
     assert me.json()["group"]["code_masked"].startswith("FA")
 
     created = client.post(
         "/api/group/reminders",
-        headers={"Authorization": f"Bearer {token}"},
         json={
             "title": "妈妈生日",
             "person_name": "妈妈",
@@ -89,7 +95,7 @@ def test_admin_create_and_join_flow() -> None:
     assert reminder["title"] == "妈妈生日"
     assert "提前7天" in reminder["rule_text"]
 
-    plans = client.get("/api/group/plans?status=pending", headers={"Authorization": f"Bearer {token}"})
+    plans = client.get("/api/group/plans?status=pending")
     assert plans.status_code == 200
     assert len(plans.json()) >= 1
 
@@ -134,12 +140,10 @@ def test_reminder_update_delete_and_session_reset() -> None:
     group_id = created_group.json()["id"]
 
     joined = client.post("/api/public/groups/join", json={"group_code": "FAMILY01"})
-    token = joined.json()["session"]["token"]
-    headers = {"Authorization": f"Bearer {token}"}
+    assert joined.status_code == 200
 
     created = client.post(
         "/api/group/reminders",
-        headers=headers,
         json={
             "title": "生日",
             "calendar_type": "solar",
@@ -155,7 +159,6 @@ def test_reminder_update_delete_and_session_reset() -> None:
 
     updated = client.put(
         f"/api/group/reminders/{reminder_id}",
-        headers=headers,
         json={
             "title": "生日（已修改）",
             "calendar_type": "solar",
@@ -169,9 +172,9 @@ def test_reminder_update_delete_and_session_reset() -> None:
     assert updated.status_code == 200
     assert updated.json()["rule_text"] == "提前3天 10:00"
 
-    deleted = client.delete(f"/api/group/reminders/{reminder_id}", headers=headers)
+    deleted = client.delete(f"/api/group/reminders/{reminder_id}")
     assert deleted.status_code == 200
-    assert client.get("/api/group/reminders", headers=headers).json() == []
+    assert client.get("/api/group/reminders").json() == []
 
     reset = client.post(
         f"/api/admin/groups/{group_id}/reset-code",
@@ -179,7 +182,7 @@ def test_reminder_update_delete_and_session_reset() -> None:
         json={"code": "FAMILY99"},
     )
     assert reset.status_code == 200
-    assert client.get("/api/group/me", headers=headers).status_code == 401
+    assert client.get("/api/group/me").status_code == 401
 
 
 def test_invalid_empty_reminder_rule_is_rejected() -> None:
@@ -195,10 +198,9 @@ def test_invalid_empty_reminder_rule_is_rejected() -> None:
         },
     )
     joined = client.post("/api/public/groups/join", json={"group_code": "FAMILY01"})
-    headers = {"Authorization": f"Bearer {joined.json()['session']['token']}"}
+    assert joined.status_code == 200
     response = client.post(
         "/api/group/reminders",
-        headers=headers,
         json={
             "title": "无效提醒",
             "calendar_type": "solar",
