@@ -1,0 +1,16 @@
+[Unit]
+Description=HaoRiZi reminder worker
+After=network.target
+
+[Service]
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/opt/haorizi/backend
+EnvironmentFile=/opt/haorizi/backend/.env
+ExecStart=/opt/haorizi/backend/.venv/bin/python -m app.worker
+Restart=always
+RestartSec=5
+TimeoutStopSec=10
+
+[Install]
+WantedBy=multi-user.target

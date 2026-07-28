@@ -1,0 +1,10 @@
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+SQLAlchemy==2.0.36
+alembic==1.14.0
+PyMySQL[rsa]==1.1.1
+pydantic==2.10.4
+httpx==0.28.1
+itsdangerous==2.2.0
+lunardate==0.2.2
+python-dotenv==1.0.1

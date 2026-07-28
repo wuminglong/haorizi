@@ -1,0 +1,15 @@
+[Unit]
+Description=HaoRiZi FastAPI service
+After=network.target
+
+[Service]
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/opt/haorizi/backend
+EnvironmentFile=/opt/haorizi/backend/.env
+ExecStart=/opt/haorizi/backend/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

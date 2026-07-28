@@ -1,0 +1,238 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+umask 027
+
+readonly APP_ROOT="/opt/haorizi"
+readonly REPO_DIR="$APP_ROOT/repository.git"
+readonly RELEASES_DIR="$APP_ROOT/releases"
+readonly SHARED_DIR="$APP_ROOT/shared"
+readonly SHARED_ENV="$SHARED_DIR/backend.env"
+readonly BACKUPS_DIR="$APP_ROOT/backups"
+readonly CURRENT_LINK="$APP_ROOT/current"
+readonly PREVIOUS_LINK="$APP_ROOT/previous"
+readonly BACKEND_LINK="$APP_ROOT/backend"
+readonly FRONTEND_LINK="$APP_ROOT/frontend"
+readonly DEPLOY_LOCK="/run/lock/haorizi-deploy.lock"
+readonly DEPLOY_USER="haorizi-deploy"
+readonly API_SERVICE="haorizi-api.service"
+readonly WORKER_SERVICE="haorizi-worker.service"
+readonly DEPLOY_CONFIG="/etc/haorizi-deploy.conf"
+
+die() {
+  echo "deployment failed: $*" >&2
+  exit 1
+}
+
+[[ "$(id -u)" -eq 0 ]] || die "this wrapper must run as root"
+[[ -r "$DEPLOY_CONFIG" ]] || die "missing $DEPLOY_CONFIG"
+
+# The configuration file is installed root-owned and is not writable by the deploy user.
+# shellcheck disable=SC1090
+source "$DEPLOY_CONFIG"
+: "${HAORIZI_REPO_URL:?HAORIZI_REPO_URL is required}"
+
+bootstrap=0
+if [[ "${1-}" == "--bootstrap" ]]; then
+  bootstrap=1
+  shift
+fi
+
+requested_sha="${1-}"
+[[ $# -eq 1 && "$requested_sha" =~ ^[0-9a-f]{40}$ ]] || die "expected one full lowercase commit SHA"
+
+exec 9>"$DEPLOY_LOCK"
+flock -n 9 || die "another deployment is already running"
+
+run_as_deploy() {
+  runuser -u "$DEPLOY_USER" -- "$@"
+}
+
+atomic_link() {
+  local target="$1"
+  local link="$2"
+  local temporary="${link}.next.$$"
+  ln -s "$target" "$temporary"
+  mv -Tf "$temporary" "$link"
+}
+
+revision_for() {
+  local backend_dir="$1"
+  run_as_deploy bash -c '
+    set -o pipefail
+    cd "$1"
+    .venv/bin/alembic current 2>/dev/null | tail -n 1
+  ' _ "$backend_dir" || true
+}
+
+install -d -o "$DEPLOY_USER" -g "$DEPLOY_USER" -m 0750 "$RELEASES_DIR" "$BACKUPS_DIR"
+install -d -o root -g haorizi-runtime -m 0750 "$SHARED_DIR"
+[[ -r "$SHARED_ENV" ]] || die "production environment file is unavailable"
+
+if [[ ! -d "$REPO_DIR/objects" ]]; then
+  install -d -o "$DEPLOY_USER" -g "$DEPLOY_USER" -m 0750 "$REPO_DIR"
+  run_as_deploy git init --bare "$REPO_DIR"
+  run_as_deploy git --git-dir="$REPO_DIR" remote add origin "$HAORIZI_REPO_URL"
+fi
+
+actual_origin="$(run_as_deploy git --git-dir="$REPO_DIR" remote get-url origin)"
+[[ "$actual_origin" == "$HAORIZI_REPO_URL" ]] || die "repository origin does not match the root-owned configuration"
+
+run_as_deploy git --git-dir="$REPO_DIR" fetch --quiet --prune origin \
+  '+refs/heads/main:refs/remotes/origin/main'
+
+main_sha="$(run_as_deploy git --git-dir="$REPO_DIR" rev-parse refs/remotes/origin/main)"
+[[ "$requested_sha" == "$main_sha" ]] || die "requested SHA is not the current origin/main tip"
+run_as_deploy git --git-dir="$REPO_DIR" cat-file -e "${requested_sha}^{commit}"
+
+release_dir="$RELEASES_DIR/$requested_sha"
+if [[ ! -f "$release_dir/.release-ready" ]]; then
+  [[ ! -e "$release_dir" ]] || die "incomplete release directory already exists: $requested_sha"
+  install -d -o "$DEPLOY_USER" -g "$DEPLOY_USER" -m 0750 "$release_dir"
+  run_as_deploy bash -c '
+    set -o pipefail
+    git --git-dir="$1" archive "$2" | tar -x -C "$3"
+  ' _ "$REPO_DIR" "$requested_sha" "$release_dir"
+
+  [[ ! -e "$release_dir/backend/.env" ]] || die "repository archive unexpectedly contains backend/.env"
+  ln -s "$SHARED_ENV" "$release_dir/backend/.env"
+  chown -h "$DEPLOY_USER:$DEPLOY_USER" "$release_dir/backend/.env"
+
+  run_as_deploy python3 -m venv "$release_dir/backend/.venv"
+  run_as_deploy "$release_dir/backend/.venv/bin/python" -m pip install \
+    --disable-pip-version-check \
+    --requirement "$release_dir/backend/requirements.txt"
+  run_as_deploy "$release_dir/backend/.venv/bin/python" -m compileall -q \
+    "$release_dir/backend/app" "$release_dir/backend/alembic"
+
+  run_as_deploy "$release_dir/backend/.venv/bin/python" -c '
+from dotenv import dotenv_values
+import sys
+value = str(dotenv_values(sys.argv[1]).get("AUTO_CREATE_TABLES", "")).strip().lower()
+raise SystemExit(0 if value in {"0", "false", "no", "off"} else 1)
+' "$SHARED_ENV" || die "production AUTO_CREATE_TABLES must be false"
+
+  touch "$release_dir/.release-ready"
+  chown "$DEPLOY_USER:$DEPLOY_USER" "$release_dir/.release-ready"
+fi
+
+if [[ -L "$CURRENT_LINK" && "$(readlink -f "$CURRENT_LINK")" == "$release_dir" ]]; then
+  echo "release $requested_sha is already active"
+  exit 0
+fi
+
+old_release=""
+if [[ -L "$CURRENT_LINK" ]]; then
+  old_release="$(readlink -f "$CURRENT_LINK")"
+fi
+
+if (( ! bootstrap )); then
+  [[ -n "$old_release" ]] || die "initial deployment requires --bootstrap"
+  [[ -L "$BACKEND_LINK" && -L "$FRONTEND_LINK" ]] || die "runtime entry paths are not managed symlinks"
+else
+  [[ -d "$BACKEND_LINK" && ! -L "$BACKEND_LINK" ]] || die "bootstrap expects the existing backend directory"
+  [[ -d "$FRONTEND_LINK" && ! -L "$FRONTEND_LINK" ]] || die "bootstrap expects the existing frontend directory"
+fi
+
+run_as_deploy "$release_dir/backend/.venv/bin/python" \
+  "$release_dir/deploy/server/backup_database.py" \
+  --env-file "$SHARED_ENV" \
+  --backup-dir "$BACKUPS_DIR" \
+  --sha "$requested_sha"
+
+before_revision="$(revision_for "$release_dir/backend")"
+services_stopped=0
+migration_started=0
+migration_succeeded=0
+switched=0
+legacy_dir=""
+
+restore_after_error() {
+  local rc=$?
+  trap - ERR
+
+  if (( ! services_stopped )); then
+    exit "$rc"
+  fi
+
+  systemctl stop "$WORKER_SERVICE" "$API_SERVICE" >/dev/null 2>&1 || true
+
+  if (( migration_started && ! migration_succeeded )); then
+    echo "migration failed; services remain stopped for manual database recovery" >&2
+    exit "$rc"
+  fi
+
+  if [[ "${after_revision-}" != "$before_revision" ]]; then
+    echo "database revision changed; automatic code rollback is unsafe and services remain stopped" >&2
+    exit "$rc"
+  fi
+
+  if (( switched )); then
+    if (( bootstrap )); then
+      rm -f "$BACKEND_LINK" "$FRONTEND_LINK" "$CURRENT_LINK"
+      mv "$legacy_dir/backend" "$BACKEND_LINK"
+      mv "$legacy_dir/frontend" "$FRONTEND_LINK"
+    elif [[ -n "$old_release" && -d "$old_release" ]]; then
+      atomic_link "$old_release" "$CURRENT_LINK"
+      atomic_link "$old_release/backend" "$BACKEND_LINK"
+      atomic_link "$old_release/frontend" "$FRONTEND_LINK"
+    fi
+  fi
+
+  systemctl start "$API_SERVICE" "$WORKER_SERVICE" >/dev/null 2>&1 || true
+  echo "previous code was restored after deployment failure" >&2
+  exit "$rc"
+}
+trap restore_after_error ERR
+
+systemctl stop "$WORKER_SERVICE"
+systemctl stop "$API_SERVICE"
+services_stopped=1
+migration_started=1
+
+run_as_deploy bash -c '
+  set -Eeuo pipefail
+  cd "$1"
+  .venv/bin/alembic upgrade head
+' _ "$release_dir/backend"
+migration_succeeded=1
+after_revision="$(revision_for "$release_dir/backend")"
+
+if (( bootstrap )); then
+  legacy_dir="$APP_ROOT/legacy-$(date -u +%Y%m%dT%H%M%SZ)"
+  install -d -o root -g root -m 0750 "$legacy_dir"
+  mv "$BACKEND_LINK" "$legacy_dir/backend"
+  mv "$FRONTEND_LINK" "$legacy_dir/frontend"
+fi
+
+atomic_link "$release_dir" "$CURRENT_LINK"
+atomic_link "$release_dir/backend" "$BACKEND_LINK"
+atomic_link "$release_dir/frontend" "$FRONTEND_LINK"
+switched=1
+
+systemctl start "$API_SERVICE"
+
+healthy=0
+for _ in $(seq 1 20); do
+  if curl --fail --silent --show-error --connect-timeout 2 --max-time 5 \
+      http://127.0.0.1:8000/api/public/health >/dev/null \
+      && systemctl is-active --quiet "$API_SERVICE"; then
+    healthy=1
+    break
+  fi
+  sleep 2
+done
+if (( ! healthy )); then
+  echo "deployment failed: API health check did not recover" >&2
+  false
+fi
+
+systemctl start "$WORKER_SERVICE"
+systemctl is-active --quiet "$API_SERVICE"
+systemctl is-active --quiet "$WORKER_SERVICE"
+
+if [[ -n "$old_release" && -d "$old_release" ]]; then
+  atomic_link "$old_release" "$PREVIOUS_LINK"
+fi
+
+trap - ERR
+echo "deployed $requested_sha"

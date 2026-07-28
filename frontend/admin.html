@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>好日子 · 管理员</title>
+  <link rel="stylesheet" href="./app.css">
+</head>
+<body>
+  <main class="page admin-page">
+    <section class="hero admin-hero">
+      <div class="eyebrow">管理员</div>
+      <h1>好日子管理台</h1>
+      <p id="admin-subtitle">登录后管理群组、提醒和发送任务。</p>
+    </section>
+
+    <section id="login-card" class="card">
+      <div class="card-body stack">
+        <div class="field"><label for="admin-password">管理员密码</label><input id="admin-password" type="password" autocomplete="current-password" placeholder="请输入管理员密码"></div>
+        <button id="login-btn" class="btn" type="button">登录管理台</button>
+        <div id="login-msg" class="msg error hidden"></div>
+      </div>
+    </section>
+
+    <section id="admin-app" class="hidden">
+      <div class="admin-actions"><button id="reload-btn" class="btn secondary" type="button">刷新数据</button><button id="admin-logout-btn" class="btn ghost" type="button">退出管理台</button></div>
+      <div id="admin-msg" class="msg error hidden"></div>
+      <div class="admin-stats" aria-label="运行概览">
+        <div class="stat-card"><span>群组</span><strong id="stat-groups">0</strong></div>
+        <div class="stat-card"><span>启用提醒</span><strong id="stat-reminders">0</strong></div>
+        <div class="stat-card"><span>待发送</span><strong id="stat-pending">0</strong></div>
+        <div class="stat-card"><span>发送失败</span><strong id="stat-failed">0</strong></div>
+      </div>
+
+      <details class="admin-module" open>
+        <summary>群组 <span id="group-count" class="summary-meta"></span></summary>
+        <div class="module-body stack">
+          <form id="group-form" class="stack">
+            <div class="section-label">新建群组</div>
+            <div class="field"><label>群名称</label><input name="name" required placeholder="如：吴家提醒群"></div>
+            <div class="row"><div class="field"><label>群组码</label><input name="code" required minlength="6" maxlength="16" placeholder="FAMILY01"></div><div class="field"><label>PushPlus 群编码</label><input name="push_topic_code" required placeholder="family001"></div></div>
+            <div class="field"><label>群说明（可选）</label><textarea name="description" placeholder="家里生日和纪念日提醒"></textarea></div>
+            <div class="field"><label>默认提醒时间</label><input name="default_remind_time" type="time" value="09:00"></div>
+            <button class="btn" type="submit">创建群组</button>
+          </form>
+          <div id="group-list" class="list"></div>
+        </div>
+      </details>
+
+      <details class="admin-module">
+        <summary>提醒 <span id="reminder-count" class="summary-meta"></span></summary>
+        <div class="module-body stack">
+          <div class="admin-filter"><label for="reminder-group-filter">群组</label><select id="reminder-group-filter"><option value="">全部群组</option></select></div>
+          <div id="admin-reminder-list" class="list"></div>
+        </div>
+      </details>
+
+      <details class="admin-module">
+        <summary>成员 <span id="member-count" class="summary-meta"></span></summary>
+        <div class="module-body stack"><div id="member-list" class="list"></div></div>
+      </details>
+
+      <details class="admin-module">
+        <summary>发送 <span id="send-count" class="summary-meta"></span></summary>
+        <div class="module-body stack">
+          <div id="plan-list" class="list"></div>
+          <div class="section-label">最近发送记录</div>
+          <div id="send-log-list" class="list"></div>
+        </div>
+      </details>
+    </section>
+  </main>
+  <div id="reminder-sheet-mask" class="sheet-mask hidden">
+    <form id="reminder-form" class="sheet" novalidate>
+      <div class="sheet-head"><h2>编辑提醒</h2><button id="reminder-sheet-close" class="btn ghost" type="button">关闭</button></div>
+      <div class="stack">
+        <div class="field"><label for="r-title">提醒名称</label><input id="r-title" required maxlength="100"></div>
+        <div class="field"><label for="r-person">相关人（可选）</label><input id="r-person" maxlength="100"></div>
+        <div class="row"><div class="field"><label for="r-calendar">日历类型</label><select id="r-calendar"><option value="solar">阳历</option><option value="lunar">农历</option></select></div><div class="field"><label for="r-recurring">每年重复</label><select id="r-recurring"><option value="1">是</option><option value="0">否</option></select></div></div>
+        <div class="row"><div class="field"><label for="r-year">年份</label><input id="r-year" type="number" min="1901" max="2099" placeholder="一次性必填"></div><div class="field"><label for="r-month">月</label><input id="r-month" type="number" min="1" max="12"></div><div class="field"><label for="r-day">日</label><input id="r-day" type="number" min="1" max="31"></div></div>
+        <div class="switch-row"><span>闰月</span><input id="r-leap" type="checkbox"></div>
+        <div class="field"><label for="r-leap-policy">闰月策略</label><select id="r-leap-policy"><option value="skip">没有闰月时跳过该年</option><option value="regular_month">没有闰月时按普通月份提醒</option></select></div>
+        <div class="field"><label for="r-missing-day-policy">缺日策略</label><select id="r-missing-day-policy"><option value="last_day">当月没有该日时提前至最后一天</option><option value="skip">当月没有该日时跳过</option></select></div>
+        <div class="field"><label for="r-time">提醒时间</label><input id="r-time" type="time"></div>
+        <div class="field"><label for="r-advance">提前天数</label><input id="r-advance" type="number" min="0" max="365"></div>
+        <div class="switch-row"><span>当天也提醒</span><input id="r-on-day" type="checkbox"></div>
+        <div class="field"><label for="r-remark">备注</label><textarea id="r-remark" maxlength="500"></textarea></div>
+        <div class="switch-row"><span>启用提醒</span><input id="r-enabled" type="checkbox"></div>
+        <div id="reminder-form-msg" class="msg error hidden"></div>
+        <button id="reminder-save-btn" class="btn" type="submit">保存提醒</button>
+      </div>
+    </form>
+  </div>
+  <script>
+    const API_BASE = location.pathname.startsWith('/haorizi') ? '/haorizi-api' : '';
+    const $ = (id) => document.getElementById(id);
+    const state = { dashboard: {}, groups: [], reminders: [], members: [], membersEnabled: true, membersMessage: '', plans: [], logs: [], editingReminder: null };
+    const esc = (value) => String(value ?? '').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;');
+    const asArray = (value, keys = []) => Array.isArray(value) ? value : keys.map((key) => value?.[key]).find(Array.isArray) || [];
+    const message = (text, target = $('admin-msg')) => { target.textContent = text; target.classList.remove('hidden'); };
+    const clearMessage = (target = $('admin-msg')) => { target.textContent = ''; target.classList.add('hidden'); };
+    function sessionExpired() { $('admin-app').classList.add('hidden'); $('login-card').classList.remove('hidden'); $('admin-password').focus(); }
+    async function api(path, options = {}) {
+      let resp;
+      try { resp = await fetch(API_BASE + path, { credentials: 'same-origin', ...options, headers: { 'Content-Type': 'application/json', ...(options.headers || {}) } }); }
+      catch (_) { throw new Error('网络异常，请检查网络后重试'); }
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok) { if (resp.status === 401) sessionExpired(); const error = new Error(data.detail || (resp.status >= 500 ? '服务暂时不可用，请稍后重试' : '请求失败，请重试')); error.status = resp.status; throw error; }
+      return data;
+    }
+    function dateText(value) { if (!value) return '-'; const d = new Date(value); return Number.isNaN(d.getTime()) ? value : d.toLocaleString('zh-CN', { hour12: false }); }
+    function groupIdFor(item) { return item.group_id || item.group?.id || ''; }
+    function renderGroups() {
+      $('group-count').textContent = state.groups.length ? `${state.groups.length} 个` : '';
+      $('group-list').innerHTML = state.groups.length ? '' : '<div class="empty">暂无群组</div>';
+      $('reminder-group-filter').innerHTML = '<option value="">全部群组</option>' + state.groups.map((g) => `<option value="${g.id}">${esc(g.name)}</option>`).join('');
+      state.groups.forEach((group) => {
+        const el = document.createElement('article'); el.className = 'item admin-item';
+        el.innerHTML = `<div class="item-top"><div class="item-title">${esc(group.name)}</div><span class="badge ${group.status === 'active' ? '' : 'off'}">${group.status === 'active' ? '启用' : '已停用'}</span></div><div class="item-meta">群组码：${esc(group.code || group.code_masked || '-')}<br>PushPlus：${esc(group.push_topic_code || '-')}<br>${esc(group.description || '暂无说明')}</div><div class="admin-item-actions"><button class="btn secondary" data-action="edit">编辑</button><button class="btn secondary" data-action="reset">重置群组码</button></div>`;
+        el.querySelector('[data-action="edit"]').addEventListener('click', () => editGroup(group)); el.querySelector('[data-action="reset"]').addEventListener('click', () => resetCode(group)); $('group-list').appendChild(el);
+      });
+    }
+    function renderReminders() {
+      const selected = $('reminder-group-filter').value; const items = selected ? state.reminders.filter((item) => String(groupIdFor(item)) === selected) : state.reminders;
+      $('reminder-count').textContent = state.reminders.length ? `${state.reminders.length} 条` : ''; $('admin-reminder-list').innerHTML = items.length ? '' : '<div class="empty">暂无提醒</div>';
+      items.forEach((item) => { const el = document.createElement('article'); el.className = 'item admin-item'; el.innerHTML = `<div class="item-top"><div class="item-title">${esc(item.title || item.reminder_title)}</div><span class="badge ${item.enabled === false || item.deleted_at ? 'off' : ''}">${item.deleted_at ? '已删除' : item.enabled === false ? '已停用' : '启用'}</span></div><div class="item-meta">${esc(item.group_name || item.group?.name || '群组 #' + groupIdFor(item))}<br>${esc(item.date_text || item.target_date || '')}${item.rule_text ? '<br>' + esc(item.rule_text) : ''}</div><div class="admin-item-actions">${item.deleted_at ? '<button class="btn secondary" data-action="restore">恢复</button>' : '<button class="btn secondary" data-action="edit">编辑</button><button class="btn secondary" data-action="toggle">' + (item.enabled === false ? '启用' : '停用') + '</button>'}<button class="btn danger" data-action="delete">删除</button></div>`;
+        const edit = el.querySelector('[data-action="edit"]'); if (edit) edit.addEventListener('click', () => openReminderSheet(item)); const toggle = el.querySelector('[data-action="toggle"]'); if (toggle) toggle.addEventListener('click', () => updateReminder(item, reminderPayload(item, { enabled: item.enabled === false }))); const restore = el.querySelector('[data-action="restore"]'); if (restore) restore.addEventListener('click', () => restoreReminder(item.id)); el.querySelector('[data-action="delete"]').addEventListener('click', () => deleteReminder(item.id)); $('admin-reminder-list').appendChild(el); });
+    }
+    function renderMembers() {
+      $('member-count').textContent = state.membersEnabled ? (state.members.length ? `${state.members.length} 人` : '') : '未启用'; $('member-list').innerHTML = state.members.length ? '' : `<div class="empty">${esc(state.membersMessage || (state.membersEnabled ? '暂无成员数据' : '成员管理尚未启用'))}</div>`;
+      state.members.forEach((member) => { const el = document.createElement('article'); el.className = 'item'; el.style.cursor = 'default'; el.innerHTML = `<div class="item-title">${esc(member.nickname || member.name || member.member_name || member.openid || '成员 #' + member.id)}</div><div class="item-meta">${esc(member.group_name || member.group?.name || '群组 #' + groupIdFor(member))}<br>${member.joined_at ? '加入于 ' + dateText(member.joined_at) : esc(member.status || '')}</div>`; $('member-list').appendChild(el); });
+    }
+    function renderSending() {
+      $('send-count').textContent = state.plans.length ? `${state.plans.length} 个计划` : ''; $('plan-list').innerHTML = state.plans.length ? '' : '<div class="empty">暂无待处理计划</div>';
+      state.plans.forEach((plan) => { const el = document.createElement('article'); el.className = 'item admin-item'; const retry = plan.status === 'failed' ? '<div class="admin-item-actions"><button class="btn secondary" data-retry>重新发送</button></div>' : ''; el.innerHTML = `<div class="item-top"><div class="item-title">${esc(plan.reminder_title || plan.title || '提醒计划')}</div><span class="badge ${plan.status === 'pending' ? '' : 'off'}">${esc(plan.status || '-')}</span></div><div class="item-meta">${esc(plan.group_name || plan.group?.name || '')}<br>计划时间：${dateText(plan.due_at)}${plan.last_error_message ? '<br>错误：' + esc(plan.last_error_message) : ''}</div>${retry}`; const retryButton = el.querySelector('[data-retry]'); if (retryButton) retryButton.addEventListener('click', () => retryPlan(plan.id)); $('plan-list').appendChild(el); });
+      $('send-log-list').innerHTML = state.logs.length ? '' : '<div class="empty">暂无发送记录</div>';
+      state.logs.forEach((log) => { const el = document.createElement('article'); el.className = 'item'; el.style.cursor = 'default'; el.innerHTML = `<div class="item-top"><div class="item-title">${esc(log.reminder_title || log.title || '发送记录')}</div><span class="badge ${log.status === 'success' || log.status === 'sent' ? '' : 'off'}">${esc(log.status || '-')}</span></div><div class="item-meta">${esc(log.group_name || log.group?.name || '')}<br>${dateText(log.created_at || log.sent_at)}${log.error_message ? '<br>错误：' + esc(log.error_message) : ''}</div>`; $('send-log-list').appendChild(el); });
+    }
+    function renderDashboard() {
+      $('stat-groups').textContent = state.dashboard.groups ?? 0;
+      $('stat-reminders').textContent = state.dashboard.enabled_reminders ?? 0;
+      $('stat-pending').textContent = state.dashboard.pending_plans ?? 0;
+      $('stat-failed').textContent = state.dashboard.failed_plans ?? 0;
+    }
+    async function loadAll() {
+      clearMessage(); const [dashboard, groups, reminders, members, logs] = await Promise.all([api('/api/admin/dashboard'), api('/api/admin/groups'), api('/api/admin/reminders'), api('/api/admin/members'), api('/api/admin/send-logs')]);
+      state.dashboard = dashboard || {}; state.groups = asArray(groups, ['items', 'groups']); state.reminders = asArray(reminders, ['items', 'reminders']); state.members = asArray(members, ['items', 'members']); state.membersEnabled = members?.enabled !== false; state.membersMessage = members?.message || ''; state.logs = asArray(logs, ['items', 'logs', 'send_logs']); state.plans = asArray(dashboard, ['plans', 'pending_plans']);
+      renderDashboard(); renderGroups(); renderReminders(); renderMembers(); renderSending();
+    }
+    async function login() { clearMessage($('login-msg')); $('login-btn').disabled = true; try { await api('/api/admin/session', { method: 'POST', body: JSON.stringify({ password: $('admin-password').value }) }); $('admin-password').value = ''; $('login-card').classList.add('hidden'); $('admin-app').classList.remove('hidden'); await loadAll(); } catch (err) { message(err.message || '登录失败', $('login-msg')); } finally { $('login-btn').disabled = false; } }
+    async function logout() { try { await api('/api/admin/session', { method: 'DELETE' }); } catch (_) {} sessionExpired(); }
+    async function createGroup(event) { event.preventDefault(); const formElement = event.currentTarget; const form = new FormData(formElement); const payload = Object.fromEntries(form.entries()); payload.description = payload.description || null; payload.default_remind_time = (payload.default_remind_time || '09:00') + ':00'; const button = formElement.querySelector('button[type="submit"]'); button.disabled = true; try { await api('/api/admin/groups', { method: 'POST', body: JSON.stringify(payload) }); formElement.reset(); message('群组已创建'); await loadAll(); } catch (err) { message(err.message); } finally { button.disabled = false; } }
+    async function editGroup(group) { const name = prompt('群名称', group.name); if (name === null) return; const description = prompt('群说明（可留空）', group.description || ''); if (description === null) return; const topic = prompt('PushPlus 群编码', group.push_topic_code || ''); if (topic === null || !topic.trim()) return; try { await api('/api/admin/groups/' + group.id, { method: 'PATCH', body: JSON.stringify({ name: name.trim(), description: description.trim() || null, push_topic_code: topic.trim() }) }); await loadAll(); } catch (err) { message(err.message); } }
+    async function resetCode(group) { const code = prompt('新群组码（6-16 位）', ''); if (!code) return; try { await api('/api/admin/groups/' + group.id + '/reset-code', { method: 'POST', body: JSON.stringify({ code: code.trim() }) }); message('群组码已重置'); await loadAll(); } catch (err) { message(err.message); } }
+    function reminderPayload(item, overrides = {}) {
+      const rule = item.rule || {};
+      return { title: item.title || '', person_name: item.person_name || null, calendar_type: item.calendar_type || 'solar', event_year: item.is_recurring ? null : (item.event_year == null ? null : Number(item.event_year)), month: Number(item.month || 1), day: Number(item.day || 1), is_leap_month: !!item.is_leap_month, leap_month_policy: item.leap_month_policy || 'skip', missing_day_policy: item.missing_day_policy || 'last_day', is_recurring: !!item.is_recurring, enabled: item.enabled !== false, remark: item.remark || null, rule: { remind_time: String(rule.remind_time || '09:00:00'), advance_days: Number(rule.advance_days || 0), include_on_day: !!rule.include_on_day }, ...overrides };
+    }
+    function openReminderSheet(item) {
+      state.editingReminder = item; const rule = item.rule || {};
+      $('r-title').value = item.title || ''; $('r-person').value = item.person_name || ''; $('r-calendar').value = item.calendar_type || 'solar'; $('r-recurring').value = item.is_recurring ? '1' : '0'; $('r-year').value = item.event_year || ''; $('r-month').value = item.month || 1; $('r-day').value = item.day || 1; $('r-leap').checked = !!item.is_leap_month; $('r-leap-policy').value = item.leap_month_policy || 'skip'; $('r-missing-day-policy').value = item.missing_day_policy || 'last_day'; $('r-time').value = String(rule.remind_time || '09:00:00').slice(0, 5); $('r-advance').value = rule.advance_days ?? 7; $('r-on-day').checked = !!rule.include_on_day; $('r-remark').value = item.remark || ''; $('r-enabled').checked = item.enabled !== false;
+      $('reminder-form-msg').classList.add('hidden'); $('reminder-sheet-mask').classList.remove('hidden');
+    }
+    function closeReminderSheet() { $('reminder-sheet-mask').classList.add('hidden'); state.editingReminder = null; }
+    function reminderPayloadFromForm(item) {
+      let time = ($('r-time').value || '09:00').trim(); if (time.length === 5) time += ':00'; const recurring = $('r-recurring').value === '1', year = ($('r-year').value || '').trim();
+      return reminderPayload(item, { title: ($('r-title').value || '').trim(), person_name: ($('r-person').value || '').trim() || null, calendar_type: $('r-calendar').value, event_year: recurring ? null : (year ? Number(year) : null), month: Number($('r-month').value || 0), day: Number($('r-day').value || 0), is_leap_month: $('r-leap').checked, leap_month_policy: $('r-leap-policy').value, missing_day_policy: $('r-missing-day-policy').value, is_recurring: recurring, enabled: $('r-enabled').checked, remark: ($('r-remark').value || '').trim() || null, rule: { remind_time: time, advance_days: Number($('r-advance').value || 0), include_on_day: $('r-on-day').checked } });
+    }
+    async function saveReminderEdit(event) { event.preventDefault(); const item = state.editingReminder; if (!item) return; const payload = reminderPayloadFromForm(item); if (!payload.title) { message('请填写提醒名称', $('reminder-form-msg')); return; } $('reminder-save-btn').disabled = true; try { await updateReminder(item, payload); closeReminderSheet(); } catch (_) {} finally { $('reminder-save-btn').disabled = false; } }
+    async function updateReminder(item, payload) { try { await api('/api/admin/reminders/' + item.id, { method: 'PUT', body: JSON.stringify(payload) }); await loadAll(); } catch (err) { message(err.message); throw err; } }
+    async function deleteReminder(id) { if (!confirm('确定删除这条提醒吗？')) return; try { await api('/api/admin/reminders/' + id, { method: 'DELETE' }); await loadAll(); } catch (err) { message(err.message); } }
+    async function restoreReminder(id) { try { await api('/api/admin/reminders/' + id + '/restore', { method: 'POST' }); await loadAll(); } catch (err) { message(err.message); } }
+    async function retryPlan(id) { try { await api('/api/admin/plans/' + id + '/retry', { method: 'POST' }); message('已提交重新发送'); await loadAll(); } catch (err) { message(err.message); } }
+    async function checkSession() { try { return await api('/api/admin/session/me'); } catch (err) { if (err.status === 404) return api('/api/admin/session'); throw err; } }
+    async function boot() { try { await checkSession(); $('login-card').classList.add('hidden'); $('admin-app').classList.remove('hidden'); await loadAll(); } catch (_) { sessionExpired(); } }
+    $('login-btn').addEventListener('click', login); $('admin-password').addEventListener('keydown', (event) => { if (event.key === 'Enter') login(); }); $('admin-logout-btn').addEventListener('click', logout); $('reload-btn').addEventListener('click', () => loadAll().catch((err) => message(err.message))); $('group-form').addEventListener('submit', createGroup); $('reminder-group-filter').addEventListener('change', renderReminders); $('reminder-form').addEventListener('submit', saveReminderEdit); $('reminder-sheet-close').addEventListener('click', closeReminderSheet); $('reminder-sheet-mask').addEventListener('click', (event) => { if (event.target === $('reminder-sheet-mask')) closeReminderSheet(); }); boot();
+  </script>
+</body>
+</html>

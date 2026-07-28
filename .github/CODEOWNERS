@@ -1,0 +1,7 @@
+# The repository owner reviews changes that can reach production.
+* @wuminglong
+
+# Deployment and database changes always require an owner review.
+/.github/workflows/ @wuminglong
+/deploy/ @wuminglong
+/backend/alembic/ @wuminglong

@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>好日子提醒</title>
+  <link rel="stylesheet" href="./app.css">
+</head>
+<body>
+  <div class="page">
+    <section class="hero">
+      <div class="eyebrow">好日子提醒</div>
+      <h1>输入群组码</h1>
+      <p>加入亲友提醒群，接收纪念日通知，也可以一起维护提醒。</p>
+    </section>
+    <section id="join-card" class="card">
+      <div class="card-body">
+        <div class="field"><label for="group-code">群组码</label><input id="group-code" placeholder="请输入群组码" autocomplete="off" autocapitalize="characters"></div>
+        <button id="join-btn" class="btn" type="button">进入群组</button>
+        <div id="join-msg" class="msg error hidden"></div>
+      </div>
+    </section>
+    <section id="qr-card" class="card hidden" style="margin-top:14px;">
+      <div class="card-body stack">
+        <div><div style="font-size:20px;font-weight:700;" id="group-name">提醒群</div><div class="muted" id="group-desc" style="margin-top:4px;"></div><div class="muted" id="group-code-mask" style="margin-top:6px;font-size:13px;"></div></div>
+        <div class="qr-wrap"><img id="qr-img" alt="入群二维码" class="hidden"><div id="qr-fallback" class="muted">入群码加载中…</div></div>
+        <div class="muted" style="font-size:14px;">1. 长按识别二维码<br>2. 加入推送群<br>3. 之后就能收到提醒<br><br>不加入推送群就收不到提醒；你仍可先去配置提醒。</div>
+        <button id="go-workspace" class="btn" type="button">进入提醒工作台</button>
+        <button id="refresh-qr" class="btn secondary" type="button">刷新二维码</button>
+      </div>
+    </section>
+  </div>
+  <script>
+    const API_BASE = location.pathname.startsWith('/haorizi') ? '/haorizi-api' : '';
+    const LEGACY_KEYS = ['hrz_group_token', 'hrz_group_id', 'hrz_group_name'];
+    const els = Object.fromEntries(['code','joinBtn','joinMsg','joinCard','qrCard','groupName','groupDesc','groupCodeMask','qrImg','qrFallback','goWorkspace','refreshQr'].map((name) => [name, document.getElementById(name.replace(/[A-Z]/g, (c) => '-' + c.toLowerCase()))]));
+    let currentGroup = null;
+    function clearLegacySession() { LEGACY_KEYS.forEach((key) => localStorage.removeItem(key)); }
+    function showMsg(text) { els.joinMsg.textContent = text; els.joinMsg.classList.remove('hidden'); }
+    function hideMsg() { els.joinMsg.classList.add('hidden'); els.joinMsg.textContent = ''; }
+    async function request(path, options = {}) {
+      let resp;
+      try { resp = await fetch(API_BASE + path, { credentials: 'same-origin', ...options, headers: { 'Content-Type': 'application/json', ...(options.headers || {}) } }); }
+      catch (_) { throw new Error('网络异常，请检查网络后重试'); }
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok) throw new Error(data.detail || (resp.status >= 500 ? '服务暂时不可用，请稍后重试' : '请求失败，请重试'));
+      return data;
+    }
+    function renderJoinPush(group, joinPush) {
+      currentGroup = group || currentGroup;
+      els.groupName.textContent = currentGroup?.name || '提醒群'; els.groupDesc.textContent = currentGroup?.description || '加入后可接收这个群的纪念日提醒'; els.groupCodeMask.textContent = '群组码 ' + (currentGroup?.code_masked || '');
+      if (joinPush?.qr_code_img_url) { els.qrImg.src = joinPush.qr_code_img_url; els.qrImg.classList.remove('hidden'); els.qrFallback.classList.add('hidden'); }
+      else { els.qrImg.classList.add('hidden'); els.qrFallback.textContent = '入群码暂时获取失败，可先进入工作台，稍后再刷新。'; els.qrFallback.classList.remove('hidden'); }
+      els.qrCard.classList.remove('hidden');
+    }
+    async function refreshQr() {
+      els.refreshQr.disabled = true;
+      try { renderJoinPush(currentGroup, await request('/api/group/join-qrcode')); }
+      catch (err) { els.qrFallback.textContent = err.message || '刷新失败'; els.qrFallback.classList.remove('hidden'); els.qrImg.classList.add('hidden'); }
+      finally { els.refreshQr.disabled = false; }
+    }
+    async function joinGroup() {
+      hideMsg(); const code = (els.code.value || '').trim(); if (!code) return showMsg('请先输入群组码');
+      els.joinBtn.disabled = true;
+      try { const data = await request('/api/public/groups/join', { method: 'POST', body: JSON.stringify({ group_code: code }) }); clearLegacySession(); renderJoinPush(data.group, data.join_push); window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' }); }
+      catch (err) { showMsg(err.message || '网络异常，请稍后重试'); }
+      finally { els.joinBtn.disabled = false; }
+    }
+    async function boot() {
+      clearLegacySession(); const qrMode = new URLSearchParams(location.search).get('mode') === 'qr';
+      try {
+        const me = await request('/api/group/me');
+        if (!qrMode) { location.replace('./index.html'); return; }
+        currentGroup = me.group; await refreshQr();
+      } catch (_) { /* no valid Cookie: remain on join form */ }
+    }
+    els.joinBtn.addEventListener('click', joinGroup); els.code.addEventListener('keydown', (event) => { if (event.key === 'Enter') joinGroup(); }); els.goWorkspace.addEventListener('click', () => { location.href = './index.html'; }); els.refreshQr.addEventListener('click', refreshQr); boot();
+  </script>
+</body>
+</html>

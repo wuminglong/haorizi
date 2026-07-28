@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>好日子提醒</title>
+  <link rel="stylesheet" href="./app.css">
+</head>
+<body>
+  <div class="page app-page">
+    <div class="topbar">
+      <div>
+        <h1 id="page-title">提醒</h1>
+        <div class="muted" id="page-subtitle" style="margin-top:4px;font-size:13px;">加载中…</div>
+      </div>
+    </div>
+
+    <div id="app-msg" class="msg error hidden"></div>
+    <button id="retry-btn" class="btn secondary hidden" type="button">重试</button>
+
+    <section id="reminders-view">
+      <div id="reminder-list" class="list"></div>
+      <div id="reminder-empty" class="empty hidden">
+        <div style="font-size:17px;font-weight:600;color:var(--text);">还没有提醒</div>
+        <p>点右下角绿色加号，添加第一条生日或纪念日提醒。</p>
+        <button id="empty-create" class="btn secondary" type="button" style="width:auto;margin:0 auto;">新建第一条提醒</button>
+      </div>
+    </section>
+
+    <section id="plans-view" class="hidden">
+      <div class="section-intro">待发送的提醒计划</div>
+      <div id="plan-list" class="list"></div>
+      <div id="plan-empty" class="empty hidden">最近没有待发送的提醒</div>
+    </section>
+
+    <section id="mine-view" class="hidden">
+      <div class="card">
+        <div class="card-body stack">
+          <div>
+            <div class="muted" style="font-size:13px;">当前群组</div>
+            <div id="mine-group-name" style="font-size:20px;font-weight:700;margin-top:4px;">-</div>
+            <div id="mine-group-meta" class="muted" style="font-size:13px;margin-top:6px;">-</div>
+          </div>
+          <button id="join-push-btn" class="btn secondary" type="button">查看 PushPlus 入群二维码</button>
+          <button id="logout-btn" class="btn danger" type="button">退出群组</button>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <nav class="bottom-nav" aria-label="主导航">
+    <button class="nav-tab active" data-tab="reminders" type="button"><span>提醒</span></button>
+    <button class="nav-tab" data-tab="plans" type="button"><span>日程</span></button>
+    <button class="nav-tab" data-tab="mine" type="button"><span>我的</span></button>
+  </nav>
+  <button id="fab" class="fab" type="button" aria-label="新建提醒">+</button>
+
+  <div id="sheet-mask" class="sheet-mask hidden">
+    <div class="sheet">
+      <div class="sheet-head">
+        <h2 id="sheet-title">新建提醒</h2>
+        <button id="sheet-close" class="btn ghost" type="button">关闭</button>
+      </div>
+      <div class="templates">
+        <button class="chip" data-tpl="on_day" type="button">仅当天</button>
+        <button class="chip" data-tpl="advance_on_day" type="button">提前7天+当天</button>
+        <button class="chip" data-tpl="advance_only" type="button">仅提前7天</button>
+      </div>
+      <div class="stack">
+        <div class="field"><label>提醒名称</label><input id="f-title" placeholder="如：妈妈生日"></div>
+        <div class="field"><label>相关人（可选）</label><input id="f-person" placeholder="如：妈妈"></div>
+        <div class="row">
+          <div class="field"><label>日历类型</label><select id="f-calendar"><option value="solar">阳历</option><option value="lunar">农历</option></select></div>
+          <div class="field"><label>每年重复</label><select id="f-recurring"><option value="1">是</option><option value="0">否</option></select></div>
+        </div>
+        <div class="row">
+          <div class="field" id="year-field"><label id="year-label">年份</label><input id="f-year" type="number" min="1901" max="2099" placeholder="一次性必填"></div>
+          <div class="field"><label>月</label><input id="f-month" type="number" min="1" max="12" value="1"></div>
+          <div class="field"><label>日</label><input id="f-day" type="number" min="1" max="31" value="1"></div>
+        </div>
+        <div class="switch-row hidden" id="leap-row"><span>农历闰月</span><input id="f-leap" type="checkbox"></div>
+        <div class="field hidden" id="leap-policy-field"><label>闰月策略</label><select id="f-leap-policy"><option value="skip">没有闰月时跳过该年</option><option value="regular_month">没有闰月时按普通月份提醒</option></select></div>
+        <div class="field hidden" id="missing-day-policy-field"><label>缺日策略</label><select id="f-missing-day-policy"><option value="last_day">当月没有该日时提前至最后一天</option><option value="skip">当月没有该日时跳过</option></select></div>
+        <div class="field"><label>提醒时间</label><input id="f-time" type="time" value="09:00"></div>
+        <div class="field"><label>提前天数</label><input id="f-advance" type="number" min="0" max="365" value="7"></div>
+        <div class="switch-row"><span>当天也提醒</span><input id="f-onday" type="checkbox" checked></div>
+        <div class="field"><label>备注</label><textarea id="f-remark" placeholder="可写礼物、饭局等备忘"></textarea></div>
+        <div class="switch-row"><span>启用提醒</span><input id="f-enabled" type="checkbox" checked></div>
+        <div id="date-preview" class="msg warn hidden"></div>
+        <div id="form-msg" class="msg error hidden"></div>
+        <button id="save-btn" class="btn" type="button">保存</button>
+        <button id="delete-btn" class="btn danger hidden" type="button">删除提醒</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const API_BASE = location.pathname.startsWith('/haorizi') ? '/haorizi-api' : '';
+    const LEGACY_KEYS = ['hrz_group_token', 'hrz_group_id', 'hrz_group_name'];
+    const state = { group: null, reminders: [], plans: [], editingId: null, tab: 'reminders' };
+    const $ = (id) => document.getElementById(id);
+    const titles = { reminders: '提醒', plans: '日程', mine: '我的' };
+
+    function clearLegacySession() { LEGACY_KEYS.forEach((key) => localStorage.removeItem(key)); }
+    function goJoin(mode) { location.href = mode ? './join.html?mode=' + encodeURIComponent(mode) : './join.html'; }
+    function showError(message) { $('app-msg').textContent = message || '加载失败，请检查网络后重试'; $('app-msg').classList.remove('hidden'); $('retry-btn').classList.remove('hidden'); }
+    function hideError() { $('app-msg').classList.add('hidden'); $('retry-btn').classList.add('hidden'); }
+
+    async function api(path, options = {}) {
+      let resp;
+      try {
+        resp = await fetch(API_BASE + path, { credentials: 'same-origin', ...options, headers: { 'Content-Type': 'application/json', ...(options.headers || {}) } });
+      } catch (_) { throw new Error('网络异常，请检查网络后重试'); }
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok) {
+        if (resp.status === 401) { clearLegacySession(); goJoin(); }
+        throw new Error(data.detail || (resp.status >= 500 ? '服务暂时不可用，请稍后重试' : '请求失败，请重试'));
+      }
+      return data;
+    }
+
+    function setTab(tab) {
+      state.tab = tab;
+      $('page-title').textContent = titles[tab];
+      $('page-subtitle').textContent = tab === 'mine' ? '群组与推送设置' : (state.group ? state.group.name : '');
+      document.querySelectorAll('.nav-tab').forEach((btn) => btn.classList.toggle('active', btn.dataset.tab === tab));
+      ['reminders', 'plans', 'mine'].forEach((name) => $(name + '-view').classList.toggle('hidden', name !== tab));
+      $('fab').classList.toggle('hidden', tab !== 'reminders');
+    }
+    function escapeHtml(str) { return String(str || '').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;'); }
+    function formatDateTime(value) { const d = new Date(value); return Number.isNaN(d.getTime()) ? value : d.toLocaleString('zh-CN', { hour12: false, month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }); }
+    function renderReminders() {
+      const list = $('reminder-list'), empty = $('reminder-empty'); list.innerHTML = '';
+      empty.classList.toggle('hidden', !!state.reminders.length);
+      state.reminders.forEach((item) => { const el = document.createElement('div'); el.className = 'item'; el.innerHTML = `<div class="item-top"><div class="item-title">${escapeHtml(item.title)}</div><span class="badge ${item.enabled ? '' : 'off'}">${item.enabled ? '启用' : '已停用'}</span></div><div class="item-meta">${item.person_name ? '相关人：' + escapeHtml(item.person_name) + '<br>' : ''}${escapeHtml(item.date_text)}</div><div class="item-foot"><span>下次：${item.upcoming_date || '无'} · ${escapeHtml(item.rule_text)}</span><span class="chev">›</span></div>`; el.addEventListener('click', () => openSheet(item)); list.appendChild(el); });
+    }
+    function renderPlans() {
+      const list = $('plan-list'), empty = $('plan-empty'); list.innerHTML = '';
+      empty.classList.toggle('hidden', !!state.plans.length);
+      state.plans.forEach((item) => { const el = document.createElement('div'); el.className = 'item'; el.style.cursor = 'default'; const kind = item.kind === 'on_day' ? '当天提醒' : '提前提醒'; el.innerHTML = `<div class="item-title">${escapeHtml(item.reminder_title)}</div><div class="item-meta">目标日 ${item.target_date}<br>发送 ${formatDateTime(item.due_at)}<br>类型 ${kind}</div>`; list.appendChild(el); });
+    }
+    function renderGroup() {
+      if (!state.group) return;
+      $('mine-group-name').textContent = state.group.name || '提醒群';
+      $('mine-group-meta').textContent = '群组码 ' + (state.group.code_masked || '');
+      if (state.tab === 'reminders' || state.tab === 'plans') $('page-subtitle').textContent = state.group.name || '';
+    }
+    function openSheet(reminder) {
+      state.editingId = reminder ? reminder.id : null; $('sheet-title').textContent = reminder ? '编辑提醒' : '新建提醒';
+      $('f-title').value = reminder ? reminder.title : ''; $('f-person').value = reminder ? (reminder.person_name || '') : ''; $('f-calendar').value = reminder ? reminder.calendar_type : 'solar'; $('f-recurring').value = reminder ? (reminder.is_recurring ? '1' : '0') : '1'; $('f-year').value = reminder && reminder.event_year ? reminder.event_year : ''; $('f-month').value = reminder ? reminder.month : 1; $('f-day').value = reminder ? reminder.day : 1; $('f-leap').checked = !!(reminder && reminder.is_leap_month); $('f-leap-policy').value = reminder ? (reminder.leap_month_policy || 'skip') : 'skip'; $('f-missing-day-policy').value = reminder ? (reminder.missing_day_policy || 'last_day') : 'last_day';
+      $('f-time').value = String(reminder ? reminder.rule.remind_time : '09:00:00').slice(0, 5); $('f-advance').value = reminder ? reminder.rule.advance_days : 7; $('f-onday').checked = reminder ? !!reminder.rule.include_on_day : true; $('f-remark').value = reminder ? (reminder.remark || '') : ''; $('f-enabled').checked = reminder ? !!reminder.enabled : true; $('delete-btn').classList.toggle('hidden', !reminder); $('form-msg').classList.add('hidden'); $('date-preview').classList.add('hidden'); updateDateControls(); $('sheet-mask').classList.remove('hidden');
+    }
+    function closeSheet() { $('sheet-mask').classList.add('hidden'); state.editingId = null; }
+    function updateDateControls() {
+      const lunar = $('f-calendar').value === 'lunar';
+      const leap = lunar && $('f-leap').checked;
+      const month = Number($('f-month').value || 0), day = Number($('f-day').value || 0);
+      $('leap-row').classList.toggle('hidden', !lunar);
+      if (!lunar) $('f-leap').checked = false;
+      $('leap-policy-field').classList.toggle('hidden', !leap);
+      $('missing-day-policy-field').classList.toggle('hidden', !((lunar && day === 30) || (!lunar && month === 2 && day === 29)));
+      $('year-label').textContent = lunar ? '农历年' : '年份';
+      $('f-year').placeholder = lunar ? '一次性必填（农历年）' : '一次性必填';
+      $('year-field').style.opacity = $('f-recurring').value === '1' ? .45 : 1;
+    }
+    function collectPayload() { let time = ($('f-time').value || '09:00').trim(); if (time.length === 5) time += ':00'; const recurring = $('f-recurring').value === '1', yearRaw = ($('f-year').value || '').trim(); return { title: ($('f-title').value || '').trim(), person_name: ($('f-person').value || '').trim() || null, calendar_type: $('f-calendar').value, event_year: recurring ? null : (yearRaw ? Number(yearRaw) : null), month: Number($('f-month').value || 0), day: Number($('f-day').value || 0), is_leap_month: $('f-leap').checked, leap_month_policy: $('f-leap-policy').value, missing_day_policy: $('f-missing-day-policy').value, is_recurring: recurring, enabled: $('f-enabled').checked, remark: ($('f-remark').value || '').trim() || null, rule: { remind_time: time, advance_days: Number($('f-advance').value || 0), include_on_day: $('f-onday').checked } }; }
+    function renderDatePreview(preview) {
+      const occurrences = Array.isArray(preview.occurrences) ? preview.occurrences.slice(0, 3) : [];
+      const warnings = Array.isArray(preview.warnings) ? preview.warnings : [];
+      const dates = occurrences.map((item) => item.target_date || item.date).filter(Boolean);
+      const lines = [];
+      if (dates.length) lines.push('未来日期：' + dates.join('、'));
+      if (warnings.length) lines.push('提示：' + warnings.map(escapeHtml).join('；'));
+      $('date-preview').innerHTML = lines.join('<br>') || '未获取到日期预览';
+      $('date-preview').classList.remove('hidden');
+    }
+    async function previewDates(payload) {
+      const preview = await api('/api/group/reminders/preview', { method: 'POST', body: JSON.stringify({ calendar_type: payload.calendar_type, event_year: payload.event_year, month: payload.month, day: payload.day, is_leap_month: payload.is_leap_month, leap_month_policy: payload.leap_month_policy, missing_day_policy: payload.missing_day_policy, is_recurring: payload.is_recurring }) });
+      renderDatePreview(preview);
+    }
+    async function saveReminder() { const payload = collectPayload(); if (!payload.title) { $('form-msg').textContent = '请填写提醒名称'; $('form-msg').classList.remove('hidden'); return; } $('save-btn').disabled = true; try { await previewDates(payload); await api('/api/group/reminders' + (state.editingId ? '/' + state.editingId : ''), { method: state.editingId ? 'PUT' : 'POST', body: JSON.stringify(payload) }); closeSheet(); await refreshAll(); } catch (err) { $('form-msg').textContent = err.message || '保存失败'; $('form-msg').classList.remove('hidden'); } finally { $('save-btn').disabled = false; } }
+    async function deleteReminder() { if (!state.editingId || !confirm('确定删除这条提醒吗？删除后不可恢复。')) return; try { await api('/api/group/reminders/' + state.editingId, { method: 'DELETE' }); closeSheet(); await refreshAll(); } catch (err) { showError(err.message); } }
+    async function refreshAll() { const [reminders, plans] = await Promise.all([api('/api/group/reminders'), api('/api/group/plans?status=pending&limit=50')]); state.reminders = reminders; state.plans = plans; renderReminders(); renderPlans(); }
+    async function boot() { clearLegacySession(); hideError(); try { const me = await api('/api/group/me'); state.group = me.group; renderGroup(); await refreshAll(); setTab(state.tab); } catch (err) { if (!location.href.includes('join.html')) showError(err.message); } }
+
+    document.querySelectorAll('.nav-tab').forEach((btn) => btn.addEventListener('click', () => setTab(btn.dataset.tab)));
+    $('fab').addEventListener('click', () => openSheet(null)); $('empty-create').addEventListener('click', () => openSheet(null)); $('sheet-close').addEventListener('click', closeSheet); $('sheet-mask').addEventListener('click', (e) => { if (e.target === $('sheet-mask')) closeSheet(); }); $('save-btn').addEventListener('click', saveReminder); $('delete-btn').addEventListener('click', deleteReminder); $('retry-btn').addEventListener('click', boot);
+    $('join-push-btn').addEventListener('click', () => goJoin('qr'));
+    $('logout-btn').addEventListener('click', async () => { if (!confirm('退出后需要重新输入群组码才能进入。')) return; try { await api('/api/group/logout', { method: 'POST' }); } catch (err) { showError(err.message); return; } clearLegacySession(); goJoin(); });
+    ['f-calendar', 'f-recurring', 'f-month', 'f-day', 'f-leap'].forEach((id) => $(id).addEventListener('change', updateDateControls)); document.querySelectorAll('.chip').forEach((chip) => chip.addEventListener('click', () => { if (chip.dataset.tpl === 'on_day') { $('f-advance').value = 0; $('f-onday').checked = true; } else if (chip.dataset.tpl === 'advance_on_day') { $('f-advance').value = 7; $('f-onday').checked = true; } else { $('f-advance').value = 7; $('f-onday').checked = false; } }));
+    boot();
+  </script>
+</body>
+</html>
