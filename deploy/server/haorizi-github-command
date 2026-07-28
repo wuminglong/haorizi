@@ -3,9 +3,22 @@ set -Eeuo pipefail
 
 readonly requested_command="${SSH_ORIGINAL_COMMAND-}"
 
+readonly INCOMING_DIR="/opt/haorizi/incoming"
+
+if [[ "$requested_command" =~ ^receive\ ([0-9a-f]{40})$ ]]; then
+  sha="${BASH_REMATCH[1]}"
+  install -d -m 0750 "$INCOMING_DIR"
+  temporary="$INCOMING_DIR/${sha}.tar.gz.partial"
+  target="$INCOMING_DIR/${sha}.tar.gz"
+  cat > "$temporary"
+  mv -f "$temporary" "$target"
+  chmod 0640 "$target"
+  exit 0
+fi
+
 if [[ "$requested_command" =~ ^deploy\ ([0-9a-f]{40})$ ]]; then
   exec sudo -n /usr/local/sbin/haorizi-deploy "${BASH_REMATCH[1]}"
 fi
 
-echo "Only 'deploy <40-character lowercase SHA>' is permitted." >&2
+echo "Only 'receive <sha>' or 'deploy <sha>' is permitted." >&2
 exit 126

@@ -5,10 +5,10 @@
 `main` 分支每次 push 都先执行测试。验证通过后，GitHub Actions 会：
 
 1. 打包当前提交的代码归档
-2. 用专用 SSH Key 把归档 SCP 到 `my` 服务器的 `/opt/haorizi/incoming/<SHA>.tar.gz`
-3. 通过受限命令 `deploy <40 位小写 commit SHA>` 触发服务器安装与切换
+2. 用专用 SSH Key 通过受限命令 `receive <SHA>` 把归档流式写入 `/opt/haorizi/incoming/<SHA>.tar.gz`
+3. 通过受限命令 `deploy <SHA>` 触发服务器安装与切换
 
-服务器不会访问 GitHub。这样可兼容 `my` 无法直接访问 `github.com:443` 的网络环境。
+服务器不会访问 GitHub，也不开放交互式 shell。这样可兼容 `my` 无法直接访问 `github.com:443` 的网络环境。
 
 ## 服务器目录
 
@@ -52,14 +52,13 @@ systemd 和 Nginx 仍使用 `/opt/haorizi/backend`、`/opt/haorizi/frontend`，�
      --exclude='backend/**/__pycache__' --exclude='**/*.pyc' --exclude='.pytest_cache' --exclude='*.db' \
      -czf /tmp/haorizi-<SHA>.tar.gz backend frontend deploy docs README.md CONTRIBUTING.md SECURITY.md pytest.ini .gitignore
 
-   scp /tmp/haorizi-<SHA>.tar.gz my:/tmp/
    scp -r deploy my:/tmp/haorizi-bootstrap/
-   scp /path/to/github-actions.pub my:/tmp/
+   scp /path/to/github-actions.pub /tmp/haorizi-<SHA>.tar.gz my:/tmp/
 
-   ssh my 'sudo /tmp/haorizi-bootstrap/bootstrap-github-deploy.sh \
+   ssh my "sudo /tmp/haorizi-bootstrap/bootstrap-github-deploy.sh \
      --sha <main 的完整 SHA> \
      --archive /tmp/haorizi-<SHA>.tar.gz \
-     --public-key-file /tmp/github-actions.pub'
+     --public-key-file /tmp/github-actions.pub"
    ```
 
 5. 验证页面、健康接口、API/worker 状态、worker 日志和数据库 revision。

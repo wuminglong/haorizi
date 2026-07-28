@@ -70,6 +70,7 @@ jobs:
           set -Eeuo pipefail
           archive="$RUNNER_TEMP/haorizi-${TARGET_SHA}.tar.gz"
           tar \
+            --format=ustar \
             --exclude='.git' \
             --exclude='backend/.env' \
             --exclude='backend/.venv' \
@@ -77,6 +78,7 @@ jobs:
             --exclude='**/*.pyc' \
             --exclude='.pytest_cache' \
             --exclude='*.db' \
+            --exclude='**/._*' \
             -czf "$archive" \
             backend frontend deploy docs README.md CONTRIBUTING.md SECURITY.md pytest.ini .gitignore
           echo "ARCHIVE_PATH=$archive" >> "$GITHUB_ENV"
@@ -95,7 +97,7 @@ jobs:
           test -s ~/.ssh/known_hosts
           chmod 0600 ~/.ssh/haorizi-deploy ~/.ssh/known_hosts
 
-      - name: Upload release archive
+      - name: Upload and activate release
         shell: bash
         env:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
@@ -107,24 +109,13 @@ jobs:
           test -n "$DEPLOY_HOST"
           test -n "$DEPLOY_USER"
           port="${DEPLOY_PORT:-22}"
-          scp -i ~/.ssh/haorizi-deploy \
+          ssh -i ~/.ssh/haorizi-deploy \
             -o BatchMode=yes \
             -o IdentitiesOnly=yes \
             -o StrictHostKeyChecking=yes \
-            -P "$port" \
-            "$ARCHIVE_PATH" \
-            "$DEPLOY_USER@$DEPLOY_HOST:/opt/haorizi/incoming/${TARGET_SHA}.tar.gz"
-
-      - name: Activate release
-        shell: bash
-        env:
-          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
-          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
-          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
-          TARGET_SHA: ${{ github.sha }}
-        run: |
-          set -Eeuo pipefail
-          port="${DEPLOY_PORT:-22}"
+            -p "$port" \
+            "$DEPLOY_USER@$DEPLOY_HOST" \
+            "receive $TARGET_SHA" < "$ARCHIVE_PATH"
           ssh -i ~/.ssh/haorizi-deploy \
             -o BatchMode=yes \
             -o IdentitiesOnly=yes \
