@@ -3,8 +3,8 @@ set -Eeuo pipefail
 umask 027
 
 readonly APP_ROOT="/opt/haorizi"
-readonly REPO_DIR="$APP_ROOT/repository.git"
 readonly RELEASES_DIR="$APP_ROOT/releases"
+readonly INCOMING_DIR="$APP_ROOT/incoming"
 readonly SHARED_DIR="$APP_ROOT/shared"
 readonly SHARED_ENV="$SHARED_DIR/backend.env"
 readonly BACKUPS_DIR="$APP_ROOT/backups"
@@ -16,7 +16,6 @@ readonly DEPLOY_LOCK="/run/lock/haorizi-deploy.lock"
 readonly DEPLOY_USER="haorizi-deploy"
 readonly API_SERVICE="haorizi-api.service"
 readonly WORKER_SERVICE="haorizi-worker.service"
-readonly DEPLOY_CONFIG="/etc/haorizi-deploy.conf"
 
 die() {
   echo "deployment failed: $*" >&2
@@ -24,12 +23,6 @@ die() {
 }
 
 [[ "$(id -u)" -eq 0 ]] || die "this wrapper must run as root"
-[[ -r "$DEPLOY_CONFIG" ]] || die "missing $DEPLOY_CONFIG"
-
-# The configuration file is installed root-owned and is not writable by the deploy user.
-# shellcheck disable=SC1090
-source "$DEPLOY_CONFIG"
-: "${HAORIZI_REPO_URL:?HAORIZI_REPO_URL is required}"
 
 bootstrap=0
 if [[ "${1-}" == "--bootstrap" ]]; then
@@ -64,40 +57,35 @@ revision_for() {
   ' _ "$backend_dir" || true
 }
 
-install -d -o "$DEPLOY_USER" -g "$DEPLOY_USER" -m 0750 "$RELEASES_DIR" "$BACKUPS_DIR"
+install -d -o "$DEPLOY_USER" -g "$DEPLOY_USER" -m 0750 \
+  "$RELEASES_DIR" "$BACKUPS_DIR" "$INCOMING_DIR"
 install -d -o root -g haorizi-runtime -m 0750 "$SHARED_DIR"
 [[ -r "$SHARED_ENV" ]] || die "production environment file is unavailable"
 
-if [[ ! -d "$REPO_DIR/objects" ]]; then
-  install -d -o "$DEPLOY_USER" -g "$DEPLOY_USER" -m 0750 "$REPO_DIR"
-  run_as_deploy git init --bare "$REPO_DIR"
-  run_as_deploy git --git-dir="$REPO_DIR" remote add origin "$HAORIZI_REPO_URL"
-fi
-
-actual_origin="$(run_as_deploy git --git-dir="$REPO_DIR" remote get-url origin)"
-[[ "$actual_origin" == "$HAORIZI_REPO_URL" ]] || die "repository origin does not match the root-owned configuration"
-
-run_as_deploy git --git-dir="$REPO_DIR" fetch --quiet --prune origin \
-  '+refs/heads/main:refs/remotes/origin/main'
-
-main_sha="$(run_as_deploy git --git-dir="$REPO_DIR" rev-parse refs/remotes/origin/main)"
-[[ "$requested_sha" == "$main_sha" ]] || die "requested SHA is not the current origin/main tip"
-run_as_deploy git --git-dir="$REPO_DIR" cat-file -e "${requested_sha}^{commit}"
+archive_path="$INCOMING_DIR/${requested_sha}.tar.gz"
+[[ -f "$archive_path" ]] || die "missing release archive: $archive_path"
 
 release_dir="$RELEASES_DIR/$requested_sha"
 if [[ ! -f "$release_dir/.release-ready" ]]; then
   [[ ! -e "$release_dir" ]] || die "incomplete release directory already exists: $requested_sha"
   install -d -o "$DEPLOY_USER" -g "$DEPLOY_USER" -m 0750 "$release_dir"
-  run_as_deploy bash -c '
-    set -o pipefail
-    git --git-dir="$1" archive "$2" | tar -x -C "$3"
-  ' _ "$REPO_DIR" "$requested_sha" "$release_dir"
+  run_as_deploy tar -xzf "$archive_path" -C "$release_dir"
 
-  [[ ! -e "$release_dir/backend/.env" ]] || die "repository archive unexpectedly contains backend/.env"
+  [[ -f "$release_dir/backend/requirements.txt" ]] || die "archive is missing backend/requirements.txt"
+  [[ -d "$release_dir/frontend" ]] || die "archive is missing frontend/"
+  [[ ! -e "$release_dir/backend/.env" ]] || die "archive unexpectedly contains backend/.env"
+
   ln -s "$SHARED_ENV" "$release_dir/backend/.env"
   chown -h "$DEPLOY_USER:$DEPLOY_USER" "$release_dir/backend/.env"
 
-  run_as_deploy python3 -m venv "$release_dir/backend/.venv"
+  if [[ -d "$BACKEND_LINK/.venv" && ! -L "$BACKEND_LINK" ]]; then
+    # Seed the first release from the currently healthy production venv so
+    # bootstrap does not depend on a full cold install from the internet.
+    run_as_deploy cp -a "$BACKEND_LINK/.venv" "$release_dir/backend/.venv"
+  else
+    run_as_deploy python3 -m venv "$release_dir/backend/.venv"
+  fi
+
   run_as_deploy "$release_dir/backend/.venv/bin/python" -m pip install \
     --disable-pip-version-check \
     --requirement "$release_dir/backend/requirements.txt"
@@ -111,8 +99,9 @@ value = str(dotenv_values(sys.argv[1]).get("AUTO_CREATE_TABLES", "")).strip().lo
 raise SystemExit(0 if value in {"0", "false", "no", "off"} else 1)
 ' "$SHARED_ENV" || die "production AUTO_CREATE_TABLES must be false"
 
+  printf '%s\n' "$requested_sha" > "$release_dir/.release-sha"
   touch "$release_dir/.release-ready"
-  chown "$DEPLOY_USER:$DEPLOY_USER" "$release_dir/.release-ready"
+  chown "$DEPLOY_USER:$DEPLOY_USER" "$release_dir/.release-sha" "$release_dir/.release-ready"
 fi
 
 if [[ -L "$CURRENT_LINK" && "$(readlink -f "$CURRENT_LINK")" == "$release_dir" ]]; then
@@ -233,6 +222,9 @@ systemctl is-active --quiet "$WORKER_SERVICE"
 if [[ -n "$old_release" && -d "$old_release" ]]; then
   atomic_link "$old_release" "$PREVIOUS_LINK"
 fi
+
+# Keep the newest successful archive and prune older incoming packages.
+find "$INCOMING_DIR" -maxdepth 1 -type f -name '*.tar.gz' ! -name "${requested_sha}.tar.gz" -delete || true
 
 trap - ERR
 echo "deployed $requested_sha"

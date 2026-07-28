@@ -5,8 +5,8 @@ umask 027
 usage() {
   cat >&2 <<'EOF'
 Usage: sudo ./deploy/bootstrap-github-deploy.sh \
-  --repo-url https://github.com/OWNER/haorizi.git \
   --sha 40_CHARACTER_MAIN_SHA \
+  --archive /path/to/sha.tar.gz \
   --public-key-file /path/to/github-actions.pub
 EOF
   exit 64
@@ -17,20 +17,20 @@ EOF
   exit 1
 }
 
-repo_url=""
 target_sha=""
+archive_path=""
 public_key_file=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --repo-url) repo_url="${2-}"; shift 2 ;;
     --sha) target_sha="${2-}"; shift 2 ;;
+    --archive) archive_path="${2-}"; shift 2 ;;
     --public-key-file) public_key_file="${2-}"; shift 2 ;;
     *) usage ;;
   esac
 done
 
-[[ "$repo_url" =~ ^https://github\.com/[A-Za-z0-9_.-]+/haorizi\.git$ ]] || usage
 [[ "$target_sha" =~ ^[0-9a-f]{40}$ ]] || usage
+[[ -f "$archive_path" ]] || usage
 [[ -f "$public_key_file" ]] || usage
 
 readonly APP_ROOT="/opt/haorizi"
@@ -54,7 +54,7 @@ readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 getent group "$RUNTIME_GROUP" >/dev/null || groupadd --system "$RUNTIME_GROUP"
 if ! id "$DEPLOY_USER" >/dev/null 2>&1; then
-  useradd --system --create-home --home-dir "$DEPLOY_HOME" --shell /bin/bash "$DEPLOY_USER"
+  useradd --system --create-home --home-dir "$DEPLOY_HOME" --shell /usr/sbin/nologin "$DEPLOY_USER"
 fi
 usermod -a -G "$RUNTIME_GROUP" "$DEPLOY_USER"
 usermod -a -G "$RUNTIME_GROUP" ubuntu
@@ -62,7 +62,7 @@ passwd --lock "$DEPLOY_USER" >/dev/null 2>&1 || true
 
 install -d -o root -g "$RUNTIME_GROUP" -m 0750 "$APP_ROOT/shared"
 install -d -o "$DEPLOY_USER" -g "$DEPLOY_USER" -m 0750 \
-  "$APP_ROOT/releases" "$APP_ROOT/backups"
+  "$APP_ROOT/releases" "$APP_ROOT/backups" "$APP_ROOT/incoming"
 
 if [[ ! -f "$APP_ROOT/shared/backend.env" ]]; then
   install -o root -g "$RUNTIME_GROUP" -m 0640 \
@@ -98,12 +98,6 @@ install -o root -g root -m 0755 \
 install -o root -g root -m 0755 \
   "$SCRIPT_DIR/server/haorizi-github-command" /usr/local/sbin/haorizi-github-command
 
-cat > /etc/haorizi-deploy.conf <<EOF
-HAORIZI_REPO_URL='$repo_url'
-EOF
-chown root:root /etc/haorizi-deploy.conf
-chmod 0644 /etc/haorizi-deploy.conf
-
 cat > /etc/sudoers.d/haorizi-deploy <<'EOF'
 Defaults:haorizi-deploy !requiretty
 haorizi-deploy ALL=(root) NOPASSWD: /usr/local/sbin/haorizi-deploy *
@@ -122,6 +116,9 @@ printf 'restrict,command="/usr/local/sbin/haorizi-github-command" %s\n' "$public
   > "$DEPLOY_HOME/.ssh/authorized_keys"
 chown "$DEPLOY_USER:$DEPLOY_USER" "$DEPLOY_HOME/.ssh/authorized_keys"
 chmod 0600 "$DEPLOY_HOME/.ssh/authorized_keys"
+
+install -o "$DEPLOY_USER" -g "$DEPLOY_USER" -m 0640 \
+  "$archive_path" "$APP_ROOT/incoming/${target_sha}.tar.gz"
 
 /usr/local/sbin/haorizi-deploy --bootstrap "$target_sha"
 

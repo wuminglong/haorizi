@@ -53,12 +53,34 @@ jobs:
     name: deploy
     needs: verify
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 20
     environment:
       name: production
       url: https://openday.cloud/haorizi/
 
     steps:
+      - name: Check out source
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Build release archive
+        shell: bash
+        env:
+          TARGET_SHA: ${{ github.sha }}
+        run: |
+          set -Eeuo pipefail
+          archive="$RUNNER_TEMP/haorizi-${TARGET_SHA}.tar.gz"
+          tar \
+            --exclude='.git' \
+            --exclude='backend/.env' \
+            --exclude='backend/.venv' \
+            --exclude='backend/**/__pycache__' \
+            --exclude='**/*.pyc' \
+            --exclude='.pytest_cache' \
+            --exclude='*.db' \
+            -czf "$archive" \
+            backend frontend deploy docs README.md CONTRIBUTING.md SECURITY.md pytest.ini .gitignore
+          echo "ARCHIVE_PATH=$archive" >> "$GITHUB_ENV"
+
       - name: Configure restricted SSH client
         shell: bash
         env:
@@ -73,7 +95,7 @@ jobs:
           test -s ~/.ssh/known_hosts
           chmod 0600 ~/.ssh/haorizi-deploy ~/.ssh/known_hosts
 
-      - name: Deploy exact commit
+      - name: Upload release archive
         shell: bash
         env:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
@@ -84,6 +106,24 @@ jobs:
           set -Eeuo pipefail
           test -n "$DEPLOY_HOST"
           test -n "$DEPLOY_USER"
+          port="${DEPLOY_PORT:-22}"
+          scp -i ~/.ssh/haorizi-deploy \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -P "$port" \
+            "$ARCHIVE_PATH" \
+            "$DEPLOY_USER@$DEPLOY_HOST:/opt/haorizi/incoming/${TARGET_SHA}.tar.gz"
+
+      - name: Activate release
+        shell: bash
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          TARGET_SHA: ${{ github.sha }}
+        run: |
+          set -Eeuo pipefail
           port="${DEPLOY_PORT:-22}"
           ssh -i ~/.ssh/haorizi-deploy \
             -o BatchMode=yes \
