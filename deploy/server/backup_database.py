@@ -11,7 +11,7 @@ import re
 import shutil
 import subprocess
 import sys
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 
 from dotenv import dotenv_values
 from sqlalchemy.engine import make_url
@@ -96,7 +96,7 @@ def main() -> int:
         raise RuntimeError("DATABASE_URL is missing from the production environment")
 
     args.backup_dir.mkdir(mode=0o750, parents=True, exist_ok=True)
-    timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     target = args.backup_dir / f"haorizi-{timestamp}-{args.sha}.sql.gz"
     backend = make_url(database_url).get_backend_name()
 
