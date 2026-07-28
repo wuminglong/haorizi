@@ -5,8 +5,9 @@ After=network.target
 [Service]
 User=ubuntu
 Group=ubuntu
+SupplementaryGroups=haorizi-runtime
 WorkingDirectory=/opt/haorizi/backend
-EnvironmentFile=/opt/haorizi/backend/.env
+EnvironmentFile=/opt/haorizi/shared/backend.env
 ExecStart=/opt/haorizi/backend/.venv/bin/python -m app.worker
 Restart=always
 RestartSec=5

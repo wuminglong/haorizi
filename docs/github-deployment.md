@@ -26,6 +26,13 @@
 
 systemd 和 Nginx 仍使用 `/opt/haorizi/backend`、`/opt/haorizi/frontend`，因此首次切换后不需要在每次发布时修改基础设施配置。
 
+权限约定：
+
+- 部署用户 `haorizi-deploy` 拥有 `releases/`、`incoming/`、`backups/`
+- 运行组 `haorizi-runtime` 可读取 backend 与 `shared/backend.env`
+- `frontend/` 对 nginx/`www-data` 可读；backend 与 secrets 仍保持不可公开读取
+- systemd 服务以 `ubuntu` 运行，并加入 `SupplementaryGroups=haorizi-runtime`，环境文件指向 `shared/backend.env`
+
 ## GitHub 配置
 
 仓库创建 `production` Environment，并配置：
@@ -73,11 +80,12 @@ bootstrap 会复制现有生产 `.env` 到 `shared/backend.env`，设置 `AUTO_C
 1. `flock` 阻止并发部署。
 2. 校验 `/opt/haorizi/incoming/<SHA>.tar.gz` 存在。
 3. 解压到独立 release，创建/复用 venv 并安装 requirements。
-4. 校验 `AUTO_CREATE_TABLES=false`。
-5. 创建数据库备份。
-6. 先停 worker，再停 API，执行 `alembic upgrade head`。
-7. 原子切换 `current`、`backend` 和 `frontend` 软链。
-8. 启动 API，通过健康检查后启动 worker。
+4. 应用 release 权限：backend 给运行组，frontend 给 nginx 可读。
+5. 校验 `AUTO_CREATE_TABLES=false`。
+6. 创建数据库备份。
+7. 先停 worker，再停 API，执行 `alembic upgrade head`。
+8. 原子切换 `current`、`backend` 和 `frontend` 软链。
+9. 启动 API，通过健康检查后启动 worker。
 
 ## 回滚边界
 

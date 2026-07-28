@@ -14,6 +14,7 @@ readonly BACKEND_LINK="$APP_ROOT/backend"
 readonly FRONTEND_LINK="$APP_ROOT/frontend"
 readonly DEPLOY_LOCK="/run/lock/haorizi-deploy.lock"
 readonly DEPLOY_USER="haorizi-deploy"
+readonly RUNTIME_GROUP="haorizi-runtime"
 readonly API_SERVICE="haorizi-api.service"
 readonly WORKER_SERVICE="haorizi-worker.service"
 
@@ -57,8 +58,38 @@ revision_for() {
   ' _ "$backend_dir" || true
 }
 
+apply_release_permissions() {
+  local release_path="$1"
+
+  # Deploy user keeps ownership; runtime group can execute backend; nginx only
+  # needs execute bits on the path and world-readable frontend assets.
+  chown -R "$DEPLOY_USER:$RUNTIME_GROUP" "$release_path"
+  find "$release_path" -type d -exec chmod 0750 {} +
+  find "$release_path" -type f -exec chmod 0640 {} +
+
+  if [[ -d "$release_path/backend/.venv/bin" ]]; then
+    find "$release_path/backend/.venv/bin" -type f -exec chmod 0750 {} +
+  fi
+  if [[ -d "$release_path/deploy" ]]; then
+    find "$release_path/deploy" -type f -exec chmod 0750 {} +
+  fi
+
+  # Allow path traversal for nginx without exposing backend code or secrets.
+  chmod 0751 "$RELEASES_DIR" "$release_path"
+  if [[ -d "$release_path/frontend" ]]; then
+    find "$release_path/frontend" -type d -exec chmod 0755 {} +
+    find "$release_path/frontend" -type f -exec chmod 0644 {} +
+  fi
+
+  if [[ -L "$release_path/backend/.env" ]]; then
+    chown -h "$DEPLOY_USER:$RUNTIME_GROUP" "$release_path/backend/.env"
+  fi
+}
+
 install -d -o "$DEPLOY_USER" -g "$DEPLOY_USER" -m 0750 \
-  "$RELEASES_DIR" "$BACKUPS_DIR" "$INCOMING_DIR"
+  "$BACKUPS_DIR" "$INCOMING_DIR"
+# releases/ must stay traversable by the runtime group and nginx path walkers.
+install -d -o "$DEPLOY_USER" -g "$RUNTIME_GROUP" -m 0751 "$RELEASES_DIR"
 install -d -o root -g haorizi-runtime -m 0750 "$SHARED_DIR"
 [[ -r "$SHARED_ENV" ]] || die "production environment file is unavailable"
 
@@ -68,7 +99,7 @@ archive_path="$INCOMING_DIR/${requested_sha}.tar.gz"
 release_dir="$RELEASES_DIR/$requested_sha"
 if [[ ! -f "$release_dir/.release-ready" ]]; then
   [[ ! -e "$release_dir" ]] || die "incomplete release directory already exists: $requested_sha"
-  install -d -o "$DEPLOY_USER" -g "$DEPLOY_USER" -m 0750 "$release_dir"
+  install -d -o "$DEPLOY_USER" -g "$RUNTIME_GROUP" -m 0751 "$release_dir"
   run_as_deploy tar -xzf "$archive_path" -C "$release_dir"
 
   [[ -f "$release_dir/backend/requirements.txt" ]] || die "archive is missing backend/requirements.txt"
@@ -76,7 +107,7 @@ if [[ ! -f "$release_dir/.release-ready" ]]; then
   [[ ! -e "$release_dir/backend/.env" ]] || die "archive unexpectedly contains backend/.env"
 
   ln -s "$SHARED_ENV" "$release_dir/backend/.env"
-  chown -h "$DEPLOY_USER:$DEPLOY_USER" "$release_dir/backend/.env"
+  chown -h "$DEPLOY_USER:$RUNTIME_GROUP" "$release_dir/backend/.env"
 
   if [[ -d "$BACKEND_LINK/.venv" && ! -L "$BACKEND_LINK" ]]; then
     # Seed the first release from the currently healthy production venv so
@@ -101,10 +132,23 @@ raise SystemExit(0 if value in {"0", "false", "no", "off"} else 1)
 
   printf '%s\n' "$requested_sha" > "$release_dir/.release-sha"
   touch "$release_dir/.release-ready"
-  chown "$DEPLOY_USER:$DEPLOY_USER" "$release_dir/.release-sha" "$release_dir/.release-ready"
+  chown "$DEPLOY_USER:$RUNTIME_GROUP" "$release_dir/.release-sha" "$release_dir/.release-ready"
+  apply_release_permissions "$release_dir"
+fi
+
+# Keep the root-owned wrapper in sync with the release being activated.
+if [[ -f "$release_dir/deploy/server/haorizi-deploy" ]]; then
+  install -o root -g root -m 0755     "$release_dir/deploy/server/haorizi-deploy" /usr/local/sbin/haorizi-deploy
+fi
+if [[ -f "$release_dir/deploy/server/haorizi-github-command" ]]; then
+  install -o root -g root -m 0755     "$release_dir/deploy/server/haorizi-github-command" /usr/local/sbin/haorizi-github-command
 fi
 
 if [[ -L "$CURRENT_LINK" && "$(readlink -f "$CURRENT_LINK")" == "$release_dir" ]]; then
+  # Re-assert permissions so a no-op deploy cannot leave nginx/backend unreadable.
+  if [[ -d "$release_dir" ]]; then
+    apply_release_permissions "$release_dir"
+  fi
   echo "release $requested_sha is already active"
   exit 0
 fi
@@ -127,6 +171,9 @@ run_as_deploy "$release_dir/backend/.venv/bin/python" \
   --env-file "$SHARED_ENV" \
   --backup-dir "$BACKUPS_DIR" \
   --sha "$requested_sha"
+
+# Existing .release-ready trees may predate the permission model; re-apply every cutover.
+apply_release_permissions "$release_dir"
 
 before_revision="$(revision_for "$release_dir/backend")"
 services_stopped=0
